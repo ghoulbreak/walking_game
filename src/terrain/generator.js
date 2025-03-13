@@ -1,7 +1,13 @@
+// src/terrain/generator.js
 import * as THREE from 'three';
 import { createNoise2D } from 'simplex-noise';
+import { getProfile, defaultProfile } from './profiles.js';
 
-export async function generateTerrain(width, depth, height) {
+export async function generateTerrain(width, depth, height, profileName = defaultProfile) {
+  // Get the terrain profile to use
+  const profile = getProfile(profileName);
+  console.log(`Generating terrain using profile: ${profile.name}`);
+  
   // Create a noise generator
   const noise2D = createNoise2D();
   
@@ -9,8 +15,8 @@ export async function generateTerrain(width, depth, height) {
   const geometry = new THREE.PlaneGeometry(width, depth, width - 1, depth - 1);
   geometry.rotateX(-Math.PI / 2); // Rotate to be horizontal
   
-  // Create heightmap using fractal Brownian motion
-  const heightMap = createHeightMapFBM(width, depth, noise2D, height);
+  // Create heightmap using profile parameters
+  const heightMap = createHeightMapFBM(width, depth, noise2D, height, profile.params);
   
   // Apply heightmap to geometry
   applyHeightMap(geometry, heightMap, width, depth);
@@ -32,6 +38,7 @@ export async function generateTerrain(width, depth, height) {
     heightMap,
     width,
     depth,
+    profile: profile.name,
     
     // Method to get height at any point
     getHeightAt(x, z) {
@@ -67,16 +74,21 @@ export async function generateTerrain(width, depth, height) {
   return terrain;
 }
 
-// Fractal Brownian Motion implementation for more natural terrain
-function createHeightMapFBM(width, depth, noise2D, heightScale) {
+// Enhanced Fractal Brownian Motion implementation with profile parameters
+function createHeightMapFBM(width, depth, noise2D, heightScale, params) {
   const heightMap = new Float32Array(width * depth);
   
-   // fBm parameters - adjusted for more dramatic terrain
-   const octaves = 9;          // More octaves for extra detail
-   const persistence = 0.5;    // Slightly reduced persistence for more height variation
-   const lacunarity = 2.1;     // Slightly increased lacunarity for more rugged features
-   const initialFrequency = 1; // Lower initial frequency for larger features
-   const ridge = 0.97;         // Higher ridge factor for sharper mountain peaks
+  // Use profile parameters or fallback to defaults
+  const octaves = params.octaves || 6;
+  const persistence = params.persistence || 0.5;
+  const lacunarity = params.lacunarity || 2.0;
+  const initialFrequency = params.initialFrequency || 1.0;
+  const ridge = params.ridge || 0.8;
+  const exponent = params.exponent || 2.0;
+  // Scale the heightScale by the profile's desired factor
+  const finalHeightScale = heightScale * (params.heightScale / 100);
+  // Optional asymmetry for mountain ranges that are steeper on one side
+  const asymmetry = params.asymmetry || 0.5; // 0.5 is symmetrical
   
   // Seed position offset (can be randomized)
   const offsetX = Math.random() * 100;
@@ -103,10 +115,10 @@ function createHeightMapFBM(width, depth, noise2D, heightScale) {
         // Get noise value (-1 to 1)
         let noiseValue = noise2D(sampleX, sampleZ);
         
-        // Ridge noise transformation (for sharper mountain peaks)
+        // Ridge noise transformation (for mountain peaks)
         noiseValue = Math.abs(noiseValue);
         noiseValue = ridge - noiseValue;
-        noiseValue = noiseValue * noiseValue;
+        noiseValue = noiseValue * noiseValue; // Square for more defined ridges
         
         // Add to height with current amplitude
         noiseHeight += noiseValue * amplitude;
@@ -120,18 +132,91 @@ function createHeightMapFBM(width, depth, noise2D, heightScale) {
       // Normalize to 0-1 range
       noiseHeight /= normalization;
       
+      // Apply asymmetry if set (creates mountains steeper on one side)
+      if (asymmetry !== 0.5) {
+        // Use X axis for asymmetry - adjust based on normalized position
+        const asymmetryFactor = nx < asymmetry ? 
+          (nx / asymmetry) : // Gradual side (scale up to 1)
+          1.0 + ((nx - asymmetry) / (1 - asymmetry)) * 0.5; // Steeper side (scale from 1 to 1.5)
+        
+        noiseHeight *= asymmetryFactor;
+      }
+      
       // Apply nonlinear transformations for more interesting terrain
-      noiseHeight = Math.pow(noiseHeight, 2.5); // Exponent makes flatter valleys, steeper mountains
+      noiseHeight = Math.pow(noiseHeight, exponent); // Adjustable exponent
       
       // Apply final height scale
-      noiseHeight *= heightScale;
+      noiseHeight *= finalHeightScale;
       
       // Store in heightmap
       heightMap[z * width + x] = noiseHeight;
     }
   }
   
+  // Apply smoothing passes if requested
+  if (params.smoothingPasses && params.smoothingPasses > 0) {
+    return applySmoothing(heightMap, width, depth, params.smoothingPasses);
+  }
+  
   return heightMap;
+}
+
+// New function to apply Gaussian-like smoothing to the heightmap
+function applySmoothing(heightMap, width, depth, passes = 1) {
+  // Create a copy of the heightmap to work with
+  const smoothedMap = new Float32Array(heightMap);
+  const tempMap = new Float32Array(heightMap.length);
+  
+  // Simple smoothing kernel (can be adjusted for different smoothing effects)
+  const kernel = [0.1, 0.2, 0.4, 0.2, 0.1]; // 5x1 kernel
+  const kernelRadius = Math.floor(kernel.length / 2);
+  
+  // Apply multiple passes of smoothing if requested
+  for (let pass = 0; pass < passes; pass++) {
+    // First smooth horizontally
+    for (let z = 0; z < depth; z++) {
+      for (let x = 0; x < width; x++) {
+        let sum = 0;
+        let weightSum = 0;
+        
+        // Apply kernel
+        for (let k = -kernelRadius; k <= kernelRadius; k++) {
+          const sampleX = Math.max(0, Math.min(width - 1, x + k));
+          const sampleIdx = z * width + sampleX;
+          const weight = kernel[k + kernelRadius];
+          
+          sum += smoothedMap[sampleIdx] * weight;
+          weightSum += weight;
+        }
+        
+        // Store horizontally smoothed result
+        tempMap[z * width + x] = sum / weightSum;
+      }
+    }
+    
+    // Then smooth vertically
+    for (let x = 0; x < width; x++) {
+      for (let z = 0; z < depth; z++) {
+        let sum = 0;
+        let weightSum = 0;
+        
+        // Apply kernel
+        for (let k = -kernelRadius; k <= kernelRadius; k++) {
+          const sampleZ = Math.max(0, Math.min(depth - 1, z + k));
+          const sampleIdx = sampleZ * width + x;
+          const weight = kernel[k + kernelRadius];
+          
+          sum += tempMap[sampleIdx] * weight;
+          weightSum += weight;
+        }
+        
+        // Store final smoothed result
+        smoothedMap[z * width + x] = sum / weightSum;
+      }
+    }
+  }
+  
+  return smoothedMap;
 }
 
 function applyHeightMap(geometry, heightMap, width, depth) {

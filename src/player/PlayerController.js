@@ -1,196 +1,170 @@
-// src/player/PlayerPhysics.js
-// Handles player physics including gravity, movement, and collisions
+// src/player/PlayerController.js
+// Controls the player's movement, physics, and state
 
 import * as THREE from 'three';
+import { PlayerPhysics } from './PlayerPhysics.js';
 
 /**
- * Handles physics calculations for the player
+ * Controls the player character
  */
-export class PlayerPhysics {
+export class PlayerController {
   /**
-   * Create a new PlayerPhysics instance
+   * Create a new PlayerController
+   * @param {THREE.Camera} camera - The camera to attach to the player
    * @param {Object} terrain - The terrain system
    */
-  constructor(terrain) {
+  constructor(camera, terrain) {
+    this.camera = camera;
     this.terrain = terrain;
-    this.gravity = 25;
+    
+    // Player state
+    this.position = new THREE.Vector3(0, 0, 0);
+    this.velocity = new THREE.Vector3(0, 0, 0);
+    this.direction = new THREE.Vector3(0, 0, 0);
+    this.rotation = { x: 0, y: 0 };
+    this.isOnGround = false;
+    this.isRunning = false;
+    
+    // Player properties
+    this.height = 1.6;           // Height of player's eyes from ground
+    this.speed = 12;             // Base movement speed
+    this.sprintSpeed = 24;       // Sprinting movement speed
+    this.jumpForce = 15;         // Force applied when jumping
+    
+    // Stamina system
+    this.stamina = {
+      current: 100,
+      max: 100,
+      recoveryRate: 15,  // Recovery per second
+      drainRate: 12      // Drain per second while sprinting
+    };
+    
+    // Create physics system
+    this.physics = new PlayerPhysics(terrain);
   }
   
   /**
-   * Update player physics
-   * @param {PlayerController} player - The player controller
+   * Update the player
    * @param {number} deltaTime - Time elapsed since last update
    */
-  update(player, deltaTime) {
-    // Calculate speed based on running state
-    const currentSpeed = player.isRunning ? player.sprintSpeed : player.speed;
+  update(deltaTime) {
+    // Update stamina
+    this.updateStamina(deltaTime);
     
-    // Set horizontal velocity based on input direction and speed
-    player.velocity.x = player.direction.x * currentSpeed;
-    player.velocity.z = player.direction.z * currentSpeed;
+    // Apply physics
+    this.physics.update(this, deltaTime);
     
-    // Apply slope physics when on ground and moving
-    const isMovingHorizontally = player.velocity.x !== 0 || player.velocity.z !== 0;
-    
-    if (this.terrain && player.isOnGround && isMovingHorizontally) {
-      this.applySlopePhysics(player);
-    }
-    
-    // Apply gravity when not on ground
-    if (!player.isOnGround) {
-      player.velocity.y -= this.gravity * deltaTime;
-    }
-    
-    // Update position
-    player.position.x += player.velocity.x * deltaTime;
-    player.position.y += player.velocity.y * deltaTime;
-    player.position.z += player.velocity.z * deltaTime;
-    
-    // Check ground collision
-    this.checkGroundCollision(player);
+    // Update camera position to follow player
+    this.updateCamera();
   }
   
   /**
-   * Apply physics adjustments based on terrain slope
-   * @param {PlayerController} player - The player controller
+   * Update the player's stamina
+   * @param {number} deltaTime - Time elapsed since last update
    */
-  applySlopePhysics(player) {
-    try {
-      const slopeFactor = this.calculateSlopeDifficulty(
-        player,
-        player.velocity.x,
-        player.velocity.z
-      );
+  updateStamina(deltaTime) {
+    // Drain stamina while sprinting and moving
+    const isMoving = this.direction.length() > 0;
+    
+    if (this.isRunning && isMoving) {
+      this.stamina.current = Math.max(0, this.stamina.current - this.stamina.drainRate * deltaTime);
       
-      if (slopeFactor >= 0) {
-        // Normal movement with slope influence
-        player.velocity.x *= slopeFactor;
-        player.velocity.z *= slopeFactor;
-      } else {
-        // Sliding downhill - find downhill direction
-        const checkDist = 2.0;
-        const heightN = this.terrain.getHeightAt(player.position.x, player.position.z - checkDist);
-        const heightS = this.terrain.getHeightAt(player.position.x, player.position.z + checkDist);
-        const heightE = this.terrain.getHeightAt(player.position.x + checkDist, player.position.z);
-        const heightW = this.terrain.getHeightAt(player.position.x - checkDist, player.position.z);
-        
-        // Calculate normalized downhill vector
-        let downX = 0, downZ = 0;
-        let validHeights = 0;
-        
-        if (heightE !== null && heightW !== null) {
-          if (heightE < heightW) downX += 1;
-          if (heightW < heightE) downX -= 1;
-          validHeights++;
-        }
-        
-        if (heightS !== null && heightN !== null) {
-          if (heightS < heightN) downZ += 1;
-          if (heightN < heightS) downZ -= 1;
-          validHeights++;
-        }
-        
-        // Only apply sliding if we have valid heights
-        if (validHeights > 0) {
-          const downMag = Math.sqrt(downX * downX + downZ * downZ);
-          if (downMag > 0) {
-            downX /= downMag;
-            downZ /= downMag;
-            
-            // Apply sliding
-            const slideSpeed = player.speed * Math.abs(slopeFactor) * 1.5;
-            player.velocity.x = downX * slideSpeed;
-            player.velocity.z = downZ * slideSpeed;
-          }
-        }
+      // Stop running if out of stamina
+      if (this.stamina.current <= 0) {
+        this.isRunning = false;
       }
-    } catch (e) {
-      // Fall back to basic movement (already set)
-      console.warn("Error in slope physics:", e);
+    } else {
+      // Recover stamina when not sprinting
+      this.stamina.current = Math.min(this.stamina.max, this.stamina.current + this.stamina.recoveryRate * deltaTime);
     }
   }
   
   /**
-   * Check for collision with the ground
-   * @param {PlayerController} player - The player controller
+   * Update the camera to follow the player
    */
-  checkGroundCollision(player) {
-    if (!this.terrain) return;
+  updateCamera() {
+    if (this.camera) {
+      this.camera.position.copy(this.position);
+    }
+  }
+  
+  /**
+   * Set the player's movement direction
+   * @param {THREE.Vector3} direction - Direction vector
+   */
+  setMovementDirection(direction) {
+    this.direction.copy(direction);
+  }
+  
+  /**
+   * Set sprinting state
+   * @param {boolean} isSprinting - Whether the player is sprinting
+   */
+  setSprinting(isSprinting) {
+    // Can only sprint if we have stamina
+    this.isRunning = isSprinting && this.stamina.current > 0;
+  }
+  
+  /**
+   * Make the player jump
+   */
+  jump() {
+    if (this.isOnGround) {
+      this.velocity.y = this.jumpForce;
+      this.isOnGround = false;
+    }
+  }
+  
+  /**
+   * Rotate the player
+   * @param {number} rotationX - X rotation (pitch)
+   * @param {number} rotationY - Y rotation (yaw)
+   */
+  rotate(rotationX, rotationY) {
+    this.rotation.y += rotationY;
+    this.rotation.x += rotationX;
+    
+    // Limit vertical look angle
+    this.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.rotation.x));
+  }
+  
+  /**
+   * Set the player's position
+   * @param {number} x - X coordinate
+   * @param {number} y - Y coordinate
+   * @param {number} z - Z coordinate
+   */
+  setPosition(x, y, z) {
+    this.position.set(x, y, z);
+    this.updateCamera();
+  }
+  
+  /**
+   * Teleport the player to a new location
+   * @param {number} x - X coordinate
+   * @param {number} z - Z coordinate
+   */
+  teleport(x, z) {
+    if (!this.terrain) return null;
     
     try {
-      const terrainHeight = this.terrain.getHeightAt(player.position.x, player.position.z);
+      const height = this.terrain.getHeightAt(x, z);
+      if (isNaN(height) || height === null) return null;
       
-      // Only process collision if we have a valid height
-      if (terrainHeight !== null && !isNaN(terrainHeight)) {
-        const playerBottom = player.position.y - player.height;
-        
-        if (playerBottom < terrainHeight) {
-          // Move up to terrain level
-          player.position.y = terrainHeight + player.height;
-          player.velocity.y = 0;
-          player.isOnGround = true;
-        } else if (Math.abs(playerBottom - terrainHeight) < 0.1) {
-          player.isOnGround = true;
-        } else {
-          player.isOnGround = false;
-        }
-      } else {
-        // No valid height found - we might be outside the terrain
-        // Just keep falling with gravity
-        player.isOnGround = false;
-      }
-    } catch (e) {
-      // Error handling for terrain issues
-      console.warn("Error in terrain collision:", e);
-    }
-  }
-  
-  /**
-   * Calculate difficulty of moving on slopes
-   * @param {PlayerController} player - The player controller
-   * @param {number} intendedX - Intended X velocity
-   * @param {number} intendedZ - Intended Z velocity
-   * @returns {number} - Slope difficulty factor (negative for sliding)
-   */
-  calculateSlopeDifficulty(player, intendedX, intendedZ) {
-    // Sample terrain height in movement direction
-    const currentX = player.position.x;
-    const currentZ = player.position.z;
-    const currentHeight = this.terrain.getHeightAt(currentX, currentZ);
-    
-    if (currentHeight === null || isNaN(currentHeight)) return 1.0; // Default to normal movement
-    
-    const sampleDistance = 1.0;
-    const moveDir = new THREE.Vector2(intendedX, intendedZ).normalize();
-    
-    const sampleX = currentX + moveDir.x * sampleDistance;
-    const sampleZ = currentZ + moveDir.y * sampleDistance;
-    const sampleHeight = this.terrain.getHeightAt(sampleX, sampleZ);
-    
-    if (sampleHeight === null || isNaN(sampleHeight)) return 1.0; // Default to normal movement
-    
-    // Calculate slope angle
-    const heightDiff = sampleHeight - currentHeight;
-    const slopeAngle = Math.atan2(heightDiff, sampleDistance);
-    const slopeAngleDegrees = slopeAngle * 180 / Math.PI;
-    
-    // Slope difficulty thresholds
-    const maxUphill = 35;
-    const maxDownhill = -45;
-    
-    // Uphill logic
-    if (slopeAngleDegrees > 0) {
-      if (slopeAngleDegrees > maxUphill) {
-        return 0; // Too steep to climb
-      }
-      return 1 - (slopeAngleDegrees / maxUphill) * 0.7; // Gradually reduce speed
-    } 
-    // Downhill logic
-    else {
-      if (slopeAngleDegrees < maxDownhill) {
-        return slopeAngleDegrees / 90; // Negative value for sliding
-      }
-      return 1 + (Math.abs(slopeAngleDegrees) / 45) * 0.2; // Slight speed boost downhill
+      const safetyMargin = 5;
+      
+      // Set position and reset physics
+      this.position.set(x, height + this.height + safetyMargin, z);
+      this.velocity.set(0, 0, 0);
+      this.isOnGround = false;
+      
+      // Update camera
+      this.updateCamera();
+      
+      return this.position.clone();
+    } catch (error) {
+      console.error("Teleport error:", error);
+      return null;
     }
   }
 }

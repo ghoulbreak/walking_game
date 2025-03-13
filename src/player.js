@@ -170,70 +170,63 @@ export function updatePlayer(player, deltaTime, terrain) {
     const intendedMovementX = rotatedDirection.x * currentSpeed;
     const intendedMovementZ = rotatedDirection.z * currentSpeed;
     
-    // Check slope gradient before moving
-    if (terrain && (intendedMovementX !== 0 || intendedMovementZ !== 0)) {
-      try {
-        // Calculate slope at current position and intended position
-        const currentHeight = terrain.getHeightAt(player.position.x, player.position.z);
-        const aheadX = player.position.x + intendedMovementX * deltaTime * 2; // Look ahead
-        const aheadZ = player.position.z + intendedMovementZ * deltaTime * 2;
-        const aheadHeight = terrain.getHeightAt(aheadX, aheadZ);
+    // Apply basic movement first
+    player.velocity.x = intendedMovementX;
+    player.velocity.z = intendedMovementZ;
+    
+    // Apply slope physics if we're actually trying to move and on the ground
+    if (terrain && player.isOnGround && (intendedMovementX !== 0 || intendedMovementZ !== 0)) {
+        try {
+        // Get normalized movement direction
+        const moveDirX = intendedMovementX === 0 ? 0 : intendedMovementX / Math.abs(intendedMovementX);
+        const moveDirZ = intendedMovementZ === 0 ? 0 : intendedMovementZ / Math.abs(intendedMovementZ);
         
-        // Calculate slope angle
-        const distance = Math.sqrt(
-          Math.pow(aheadX - player.position.x, 2) + 
-          Math.pow(aheadZ - player.position.z, 2)
+        // Calculate the slope difficulty factor
+        const slopeFactor = calculateSlopeDifficulty(
+            player, moveDirX, moveDirZ, terrain, deltaTime
         );
-        const heightDiff = aheadHeight - currentHeight;
-        const slopeAngle = Math.atan2(heightDiff, distance);
-        const slopePercent = Math.abs(Math.tan(slopeAngle));
         
-        // Maximum slope the player can climb (in percent, e.g., 0.6 = 60% grade)
-        const maxClimbableSlope = 0.55;
-        
-        // Slow down on slopes
-        const slopeSlowdown = 1.0 - (slopePercent / maxClimbableSlope) * 0.5;
-        
-        // Apply movement to velocity with slope consideration
-        if (slopePercent > maxClimbableSlope && heightDiff > 0) {
-          // Too steep to climb, slide or stop
-          if (player.isOnGround) {
-            // On ground on steep slope - strong resistance
-            player.velocity.x = intendedMovementX * 0.05;
-            player.velocity.z = intendedMovementZ * 0.05;
-            
-            // Add sliding on very steep slopes
-            if (slopePercent > 0.8) {
-              // Find downhill direction
-              const downhillX = player.position.x - aheadX;
-              const downhillZ = player.position.z - aheadZ;
-              const downhillMag = Math.sqrt(downhillX * downhillX + downhillZ * downhillZ);
-              if (downhillMag > 0) {
-                // Add sliding velocity
-                player.velocity.x += (downhillX / downhillMag) * slopePercent * 2;
-                player.velocity.z += (downhillZ / downhillMag) * slopePercent * 2;
-              }
-            }
-          } else {
-            // In air but would hit steep slope - partial resistance
-            player.velocity.x = intendedMovementX * 0.3;
-            player.velocity.z = intendedMovementZ * 0.3;
-          }
+        if (slopeFactor >= 0) {
+            // Normal movement with slope slowdown
+            player.velocity.x *= slopeFactor;
+            player.velocity.z *= slopeFactor;
         } else {
-          // Climbable slope - apply slowdown based on steepness
-          player.velocity.x = intendedMovementX * Math.max(0.3, slopeSlowdown);
-          player.velocity.z = intendedMovementZ * Math.max(0.3, slopeSlowdown);
+            // Negative factor means sliding downhill
+            // Find downhill direction
+            const currentHeight = terrain.getHeightAt(player.position.x, player.position.z);
+            
+            // Check in 4 directions to find downhill
+            const checkDist = 2.0;
+            const heightN = terrain.getHeightAt(player.position.x, player.position.z - checkDist);
+            const heightS = terrain.getHeightAt(player.position.x, player.position.z + checkDist);
+            const heightE = terrain.getHeightAt(player.position.x + checkDist, player.position.z);
+            const heightW = terrain.getHeightAt(player.position.x - checkDist, player.position.z);
+            
+            // Calculate downhill vector (negative because we want to go downhill)
+            let downX = 0;
+            let downZ = 0;
+            
+            if (heightE < heightW) downX += 1;
+            if (heightW < heightE) downX -= 1;
+            if (heightS < heightN) downZ += 1;
+            if (heightN < heightS) downZ -= 1;
+            
+            // Normalize
+            const downMag = Math.sqrt(downX * downX + downZ * downZ);
+            if (downMag > 0) {
+            downX /= downMag;
+            downZ /= downMag;
+            
+            // Apply sliding movement
+            const slideSpeed = currentSpeed * Math.abs(slopeFactor) * 1.5;
+            player.velocity.x = downX * slideSpeed;
+            player.velocity.z = downZ * slideSpeed;
+            }
         }
-      } catch (e) {
-        console.error("Error calculating slope:", e);
-        // Fallback to normal movement
-        player.velocity.x = intendedMovementX;
-        player.velocity.z = intendedMovementZ;
-      }
-    } else {
-      // No terrain or no movement input
-      player.velocity.x = intendedMovementX;
-      player.velocity.z = intendedMovementZ;
+        } catch (e) {
+        console.error("Error applying slope physics:", e);
+        // We already set up the basic velocity above, so no fallback needed
+        }
     }
     
     // Apply gravity

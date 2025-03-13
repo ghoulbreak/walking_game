@@ -7,6 +7,7 @@ import { WaypointSystem } from './waypoint-system.js';
 import { TerrainAnalyzer } from './terrain/analysis.js';
 import { TerrainProfiles, defaultProfile } from './terrain/profiles.js';
 import { launchTerrainComparison } from './terrain/tester.js';
+import * as THREE from 'three';
 
 // Performance monitoring
 let lastTime = 0;
@@ -15,6 +16,8 @@ let fps = 0;
 
 // Current terrain profile
 let currentProfile = defaultProfile;
+
+
 
 // Add the debug function somewhere at the top level of main.js
 function debugTerrainObject(terrain, label = "Terrain") {
@@ -75,6 +78,98 @@ async function init() {
   // Generate terrain with the selected profile
   const terrain = await generateTerrain(terrainWidth, terrainDepth, terrainHeight, currentProfile);
   scene.add(terrain.mesh);
+
+// Add the fixTerrainColors function to main.js (near the top of the file)
+function fixTerrainColors() {
+    console.log("Applying direct terrain color fix");
+    
+    // Check if terrain exists
+    if (!terrain || !terrain.mesh) {
+      console.error("No terrain or mesh available");
+      return;
+    }
+    
+    // Get geometry
+    const geometry = terrain.mesh.geometry;
+    if (!geometry) {
+      console.error("No geometry found on terrain mesh");
+      return;
+    }
+    
+    // Get vertex count
+    const count = geometry.attributes.position.count;
+    console.log(`Found ${count} vertices in terrain geometry`);
+    
+    // Create a simple color buffer
+    const colors = new Float32Array(count * 3);
+    
+    // Apply colors based on height
+    const positions = geometry.attributes.position.array;
+    for (let i = 0; i < count; i++) {
+      // Get Y value (height)
+      const height = positions[i * 3 + 1];
+      
+      // Very simple height-based coloring
+      // Normalize to 0-1 range (assuming heights between 0-200)
+      const normalizedHeight = Math.max(0, Math.min(1, height / 200));
+      
+      // Color index
+      const colorIndex = i * 3;
+      
+      // Simple coloring logic
+      if (normalizedHeight < 0.1) {
+        // Water - blue
+        colors[colorIndex] = 0.0;      // R
+        colors[colorIndex + 1] = 0.2;  // G
+        colors[colorIndex + 2] = 0.8;  // B
+      } 
+      else if (normalizedHeight < 0.3) {
+        // Low land - green
+        colors[colorIndex] = 0.0;      // R
+        colors[colorIndex + 1] = 0.7;  // G
+        colors[colorIndex + 2] = 0.2;  // B
+      }
+      else if (normalizedHeight < 0.7) {
+        // Mountains - brown to gray
+        const t = (normalizedHeight - 0.3) / 0.4; // 0-1 in this range
+        colors[colorIndex] = 0.4 + t * 0.3;       // R
+        colors[colorIndex + 1] = 0.3 - t * 0.1;   // G
+        colors[colorIndex + 2] = 0.2;             // B
+      }
+      else {
+        // Snow caps - white
+        const t = (normalizedHeight - 0.7) / 0.3; // 0-1 in this range
+        colors[colorIndex] = 0.7 + t * 0.3;       // R
+        colors[colorIndex + 1] = 0.7 + t * 0.3;   // G
+        colors[colorIndex + 2] = 0.7 + t * 0.3;   // B
+      }
+    }
+    
+    // Set color attribute on geometry
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    
+    // Make sure the material has vertex colors enabled
+    if (terrain.mesh.material) {
+      terrain.mesh.material.vertexColors = true;
+      
+      // Ensure the base color is white
+      terrain.mesh.material.color.setRGB(1, 1, 1);
+      
+      console.log("Updated material:", {
+        vertexColors: terrain.mesh.material.vertexColors,
+        color: terrain.mesh.material.color.getHexString()
+      });
+    } else {
+      console.error("No material found on terrain mesh");
+    }
+    
+    // Force geometry update
+    geometry.attributes.color.needsUpdate = true;
+    
+    console.log("Direct color fix applied");
+  }
+
+  fixTerrainColors();
   
   // Initialize player controls - start at a good viewpoint
   console.log("Initializing player...");
@@ -338,6 +433,8 @@ async function regenerateTerrain(profileName) {
       waypointSystem.generateWaypoints(8);
     }
     
+    fixTerrainColors();
+
     console.log(`Terrain regenerated successfully, player at (${playerX.toFixed(1)}, ${player.position.y.toFixed(1)}, ${playerZ.toFixed(1)})`);
   }
 

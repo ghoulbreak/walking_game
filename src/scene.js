@@ -59,36 +59,36 @@ export function createScene() {
 }
 
 function addLighting(scene) {
-  // Ambient light - provides base illumination
-  const ambientLight = new THREE.AmbientLight(0xCCDDFF, 0.4);
-  scene.add(ambientLight);
-  
-  // Directional light (sun)
-  const sunLight = new THREE.DirectionalLight(0xFFFFDD, 1.0);
-  sunLight.position.set(100, 150, 50);
-  sunLight.castShadow = true;
-  
-  // Improve shadow quality
-  sunLight.shadow.mapSize.width = 2048;
-  sunLight.shadow.mapSize.height = 2048;
-  sunLight.shadow.camera.near = 0.5;
-  sunLight.shadow.camera.far = 500;
-  sunLight.shadow.camera.left = -250;
-  sunLight.shadow.camera.right = 250;
-  sunLight.shadow.camera.top = 250;
-  sunLight.shadow.camera.bottom = -250;
-  sunLight.shadow.bias = -0.0005;
-  
-  scene.add(sunLight);
-  
-  // Hemisphere light - adds sky and ground color influence
-  const hemisphereLight = new THREE.HemisphereLight(
-    0x87CEEB, // Sky color
-    0x3A5F0B, // Ground color
-    0.6        // Intensity
-  );
-  scene.add(hemisphereLight);
-}
+    // Ambient light - provides base illumination
+    const ambientLight = new THREE.AmbientLight(0xCCDDFF, 0.6); // Increased from 0.4
+    scene.add(ambientLight);
+    
+    // Directional light (sun)
+    const sunLight = new THREE.DirectionalLight(0xFFFFDD, 0.8);
+    sunLight.position.set(100, 150, 50);
+    sunLight.castShadow = true;
+    
+    // Improve shadow quality
+    sunLight.shadow.mapSize.width = 2048;
+    sunLight.shadow.mapSize.height = 2048;
+    sunLight.shadow.camera.near = 0.5;
+    sunLight.shadow.camera.far = 500;
+    sunLight.shadow.camera.left = -250;
+    sunLight.shadow.camera.right = 250;
+    sunLight.shadow.camera.top = 250;
+    sunLight.shadow.camera.bottom = -250;
+    sunLight.shadow.bias = -0.0005;
+    
+    scene.add(sunLight);
+    
+    // Hemisphere light - adds sky and ground color influence
+    const hemisphereLight = new THREE.HemisphereLight(
+      0x87CEEB, // Sky color
+      0x3A5F0B, // Ground color
+      0.6        // Intensity
+    );
+    scene.add(hemisphereLight);
+  }
 
 export function resizeHandler(camera, renderer) {
   // Update camera aspect ratio

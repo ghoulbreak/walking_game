@@ -62,13 +62,15 @@ export class TerrainRenderer {
     // Create vertex colors based on height and slope
     this.applyTerrainColors(geometry, heightMap, width, depth);
     
-    // CRITICAL FIX: Create material with vertex colors ENABLED
+    // CRITICAL FIX: Create material with vertex colors ENABLED and proper settings
     const material = new THREE.MeshStandardMaterial({
-      vertexColors: true,  // CHANGED from false to true
+      vertexColors: true,
+      color: 0xffffff,      // White base color to not tint vertex colors
       roughness: 0.8,
       metalness: 0.1,
       flatShading: false,
-      side: THREE.FrontSide
+      side: THREE.FrontSide,
+      shadowSide: THREE.FrontSide
     });
     
     // Create mesh
@@ -96,12 +98,13 @@ export class TerrainRenderer {
     return geometry;
   }
   
-  applyTerrainColors(geometry, heightMap, width, depth) {
+  // In the applyTerrainColors method, add logging for color values:
+applyTerrainColors(geometry, heightMap, width, depth) {
     // Create colors attribute for the vertices
     const colors = new Float32Array(geometry.attributes.position.count * 3);
     const colorAttribute = new THREE.BufferAttribute(colors, 3);
     geometry.setAttribute('color', colorAttribute);
-
+  
     const positions = geometry.attributes.position.array;
     
     // Find min and max heights for proper scaling
@@ -115,24 +118,8 @@ export class TerrainRenderer {
     const heightRange = maxHeight - minHeight;
     console.log(`Terrain height range: ${minHeight.toFixed(1)} to ${maxHeight.toFixed(1)}`);
     
-    // Terrain type thresholds (normalized 0-1)
-    const waterLevel = 0.06;
-    const sandLevel = 0.09;
-    const lowGrassLevel = 0.25;
-    const midGrassLevel = 0.40;
-    const highGrassLevel = 0.55;
-    const rockLevel = 0.70;
-    const snowLineBase = 0.78;
-    
-    // Slope thresholds
-    const lowSlopeThreshold = 0.2;
-    const midSlopeThreshold = 0.4;
-    const highSlopeThreshold = 0.6;
-    
-    // Noise function for color variation
-    const colorNoise = (x, z, scale = 0.05) => {
-      return Math.sin(x * scale) * Math.cos(z * scale) * 0.5 + 0.5;
-    };
+    // Sample some color values for debugging
+    let colorSamples = [];
     
     // Set colors based on height and slope
     for (let i = 0; i < positions.length / 3; i++) {
@@ -143,125 +130,37 @@ export class TerrainRenderer {
       const height = heightMap[i];
       const normalizedHeight = (height - minHeight) / heightRange;
       
-      // Calculate gradient (steepness)
-      const gradient = calculateGradient(heightMap, width, x, z);
-      
-      // Get noise value for this position (for color variation)
-      const noise = colorNoise(x, z);
-      
-      // Determine color based on height and gradient
+      // SIMPLIFIED COLOR APPROACH FOR DEBUGGING
+      // Just use a height-based gradient for now
       let color = new THREE.Color();
       
-      if (normalizedHeight < waterLevel) {
-        // Water features - vary by depth
-        const waterMix = normalizedHeight / waterLevel;
-        color.copy(this.textures.waterDeep).lerp(this.textures.water, waterMix);
+      if (normalizedHeight < 0.1) {
+        // Water - blue
+        color.setRGB(0.2, 0.4, 0.8);
       } 
-      else if (normalizedHeight < sandLevel) {
-        // Sand/Beach areas
-        color.copy(this.textures.sand);
-        
-        // Add slight variation
-        const sandVariation = noise * 0.1;
-        color.r = Math.max(0, Math.min(1, color.r * (1.0 + sandVariation)));
-        color.g = Math.max(0, Math.min(1, color.g * (1.0 + sandVariation)));
-        color.b = Math.max(0, Math.min(1, color.b * (1.0 + sandVariation)));
+      else if (normalizedHeight < 0.3) {
+        // Lowlands - green
+        color.setRGB(0.3, 0.7, 0.3);
       }
-      else if (gradient > midSlopeThreshold) {
-        // Steep areas - use rock colors based on height
-        if (normalizedHeight > snowLineBase) {
-          // High steep areas - mix of rock and snow
-          const snowMix = Math.max(0, Math.min(1, (normalizedHeight - snowLineBase) / (1 - snowLineBase)));
-          color.copy(this.textures.rockLight).lerp(this.textures.snowDirty, snowMix * (1 - gradient * 0.5));
-        } else if (normalizedHeight > rockLevel) {
-          // Mid-high steep areas - lighter rocks
-          color.copy(this.textures.rockLight);
-        } else {
-          // Lower steep areas - darker rocks
-          color.copy(this.textures.rockDark);
-        }
-        
-        // Darken color based on slope for shadow effect
-        const shadowFactor = 1.0 - (gradient - midSlopeThreshold) * 0.5;
-        color.r *= shadowFactor;
-        color.g *= shadowFactor;
-        color.b *= shadowFactor;
+      else if (normalizedHeight < 0.7) {
+        // Mid elevations - transition to brown/rocky
+        const t = (normalizedHeight - 0.3) / 0.4;
+        color.setRGB(0.3 + t * 0.3, 0.7 - t * 0.4, 0.3 - t * 0.1);
       }
-      else if (normalizedHeight > snowLineBase) {
-        // Snow regions - transition from rock to snow
-        const snowiness = (normalizedHeight - snowLineBase) / (1 - snowLineBase);
-        
-        // Use noise to make snow line irregular
-        const adjustedSnowiness = Math.min(1, snowiness + (noise - 0.5) * 0.3);
-        
-        // Less snow on steep slopes
-        const slopeSnowFactor = Math.max(0, 1 - gradient * 2);
-        const finalSnowiness = adjustedSnowiness * slopeSnowFactor;
-        
-        if (finalSnowiness < 0.4) {
-          // Rocky areas near snow line
-          color.copy(this.textures.rockLight);
-        } else if (finalSnowiness < 0.7) {
-          // Partially snowy areas - dirty snow
-          color.copy(this.textures.rockLight).lerp(this.textures.snowDirty, (finalSnowiness - 0.4) / 0.3);
-        } else {
-          // Fully snow-covered areas
-          color.copy(this.textures.snowDirty).lerp(this.textures.snow, (finalSnowiness - 0.7) / 0.3);
-        }
-      } 
-      else if (gradient > lowSlopeThreshold) {
-        // Sloped areas - mix of rock, dirt and grass based on steepness and height
-        if (gradient > midSlopeThreshold) {
-          // Steeper slopes - more rocky
-          const rockiness = (gradient - midSlopeThreshold) / (highSlopeThreshold - midSlopeThreshold);
-          color.copy(this.textures.dirt).lerp(this.textures.rockDark, rockiness);
-        } else {
-          // Gentler slopes - more dirt/grass mix
-          const dirtiness = (gradient - lowSlopeThreshold) / (midSlopeThreshold - lowSlopeThreshold);
-          
-          // Choose grass color based on elevation
-          let grassColor;
-          if (normalizedHeight > highGrassLevel) {
-            grassColor = this.textures.highGrass;
-          } else if (normalizedHeight > midGrassLevel) {
-            grassColor = this.textures.midGrass;
-          } else {
-            grassColor = this.textures.lowGrass;
-          }
-          
-          // Mix between appropriate grass and dirt
-          color.copy(grassColor).lerp(this.textures.dirt, dirtiness);
-        }
-        
-        // Add noise variation
-        const variation = (noise - 0.5) * 0.15;
-        color.r = Math.max(0, Math.min(1, color.r + variation));
-        color.g = Math.max(0, Math.min(1, color.g + variation));
-        color.b = Math.max(0, Math.min(1, color.b + variation));
-      } 
       else {
-        // Flatter areas - grass with height-based variation
-        if (normalizedHeight > highGrassLevel) {
-          color.copy(this.textures.highGrass);
-        } else if (normalizedHeight > midGrassLevel) {
-          // Transition between mid and high grass
-          const grassMix = (normalizedHeight - midGrassLevel) / (highGrassLevel - midGrassLevel);
-          color.copy(this.textures.midGrass).lerp(this.textures.highGrass, grassMix);
-        } else if (normalizedHeight > lowGrassLevel) {
-          // Transition between low and mid grass
-          const grassMix = (normalizedHeight - lowGrassLevel) / (midGrassLevel - lowGrassLevel);
-          color.copy(this.textures.lowGrass).lerp(this.textures.midGrass, grassMix);
-        } else {
-          // Lowest areas - mix between sand and low grass
-          const grassMix = (normalizedHeight - sandLevel) / (lowGrassLevel - sandLevel);
-          color.copy(this.textures.sand).lerp(this.textures.lowGrass, grassMix);
-        }
-        
-        // Add noise-based variation for natural look
-        const variation = (noise - 0.5) * 0.1;
-        color.r = Math.max(0, Math.min(1, color.r + variation));
-        color.g = Math.max(0, Math.min(1, color.g + variation));
-        color.b = Math.max(0, Math.min(1, color.b + variation));
+        // High elevations - snow capped
+        const t = (normalizedHeight - 0.7) / 0.3;
+        color.setRGB(0.6 + t * 0.4, 0.3 + t * 0.7, 0.2 + t * 0.8);
+      }
+      
+      // Store a few samples for debugging
+      if (i % (width * 20) === 0) {
+        colorSamples.push({
+          index: i,
+          height: height,
+          normalizedHeight: normalizedHeight,
+          color: [color.r, color.g, color.b]
+        });
       }
       
       // Apply color to vertex
@@ -271,7 +170,9 @@ export class TerrainRenderer {
       colors[colorIndex + 2] = color.b;
     }
     
-    // Log completion of coloring
+    // Log color samples
+    console.log("Color samples:", colorSamples);
+    
     console.log(`Applied terrain colors to ${geometry.attributes.position.count} vertices`);
   }
   

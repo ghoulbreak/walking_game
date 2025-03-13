@@ -246,6 +246,8 @@ async function regenerateTerrain(profileName) {
       waypointSystem.terrain = terrain;
       waypointSystem.generateWaypoints(8);
     }
+
+    fixTerrainColors();
     
     console.log(`Terrain regenerated with ${profileName} profile`);
     console.log(`Player positioned at (${playerX.toFixed(1)}, ${player.position.y.toFixed(1)}, ${playerZ.toFixed(1)})`);
@@ -384,59 +386,6 @@ function setupProfileSelector(selectElement) {
 }
 
 // This is the fixed regenerateTerrain function for main.js
-
-async function regenerateTerrain(profileName) {
-    console.log(`Regenerating terrain with ${profileName} profile...`);
-    
-    // Store current player position
-    const playerX = player.position.x;
-    const playerZ = player.position.z;
-    
-    // Remove old terrain mesh from scene
-    scene.remove(terrain.mesh);
-    
-    // Clear any waypoints
-    if (waypointSystem) {
-      waypointSystem.clearWaypoints();
-    }
-    
-    // Generate new terrain with selected profile
-    currentProfile = profileName;
-    const newTerrain = await generateTerrain(terrainWidth, terrainDepth, terrainHeight, profileName);
-    
-    // Add new terrain to scene
-    scene.add(newTerrain.mesh);
-    
-    // CRITICAL FIX: Replace the entire terrain object with newTerrain
-    // Instead of just copying properties, which might miss function references
-    Object.assign(terrain, newTerrain);
-    
-    // Now get the correct height at player's position using the updated terrain
-    const heightAtPlayerPos = terrain.getHeightAt(playerX, playerZ);
-    const safetyMargin = 2; // Extra units above terrain
-    
-    // Position player safely above the new terrain
-    player.position.y = heightAtPlayerPos + player.height + safetyMargin;
-    
-    // Reset velocity to prevent falling through terrain
-    player.velocity.set(0, 0, 0);
-    player.isOnGround = true;
-    
-    // Update camera position
-    if (player.camera) {
-      player.camera.position.copy(player.position);
-    }
-    
-    // Regenerate waypoints with the updated terrain
-    if (waypointSystem) {
-      waypointSystem.terrain = terrain; // Use the main terrain reference
-      waypointSystem.generateWaypoints(8);
-    }
-    
-    fixTerrainColors();
-
-    console.log(`Terrain regenerated successfully, player at (${playerX.toFixed(1)}, ${player.position.y.toFixed(1)}, ${playerZ.toFixed(1)})`);
-  }
 
 // Start the application when the DOM is loaded
 window.addEventListener('DOMContentLoaded', init);

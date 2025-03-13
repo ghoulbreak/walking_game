@@ -232,7 +232,7 @@ function setupProfileSelector(selectElement) {
   }
 }
 
-// Update this function in main.js
+// This is the fixed regenerateTerrain function for main.js
 
 async function regenerateTerrain(profileName) {
     console.log(`Regenerating terrain with ${profileName} profile...`);
@@ -256,19 +256,15 @@ async function regenerateTerrain(profileName) {
     // Add new terrain to scene
     scene.add(newTerrain.mesh);
     
-    // Update terrain references
-    terrain.mesh = newTerrain.mesh;
-    terrain.heightMap = newTerrain.heightMap;
-    terrain.profile = newTerrain.profile;
-    terrain.getHeightAt = newTerrain.getHeightAt;
-    terrain.isRidge = newTerrain.isRidge;
+    // CRITICAL FIX: Replace the entire terrain object with newTerrain
+    // Instead of just copying properties, which might miss function references
+    Object.assign(terrain, newTerrain);
     
-    // Update player position based on new terrain height
-    // Add a safety margin to ensure player is above terrain
-    const heightAtPlayerPos = newTerrain.getHeightAt(playerX, playerZ);
+    // Now get the correct height at player's position using the updated terrain
+    const heightAtPlayerPos = terrain.getHeightAt(playerX, playerZ);
     const safetyMargin = 2; // Extra units above terrain
     
-    // Set player position with proper height
+    // Position player safely above the new terrain
     player.position.y = heightAtPlayerPos + player.height + safetyMargin;
     
     // Reset velocity to prevent falling through terrain
@@ -280,13 +276,13 @@ async function regenerateTerrain(profileName) {
       player.camera.position.copy(player.position);
     }
     
-    // Regenerate waypoints if needed
+    // Regenerate waypoints with the updated terrain
     if (waypointSystem) {
-      waypointSystem.terrain = newTerrain;
+      waypointSystem.terrain = terrain; // Use the main terrain reference
       waypointSystem.generateWaypoints(8);
     }
     
-    console.log(`Terrain regenerated, player at (${playerX.toFixed(1)}, ${player.position.y.toFixed(1)}, ${playerZ.toFixed(1)})`);
+    console.log(`Terrain regenerated successfully, player at (${playerX.toFixed(1)}, ${player.position.y.toFixed(1)}, ${playerZ.toFixed(1)})`);
   }
 
 // Start the application when the DOM is loaded

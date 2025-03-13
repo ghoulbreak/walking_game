@@ -334,27 +334,50 @@ export function updatePlayer(player, deltaTime, terrain) {
     }
   }
 // Function to teleport the player to a specific position
+// Add to player.js or update existing function
+
 export function teleportPlayer(player, x, z, terrain) {
-    // Get height at the target position
-    const height = terrain.getHeightAt(x, z);
-    
-    // Set player position
-    player.position.set(x, height + player.height, z);
-    
-    // Reset velocity
-    player.velocity.set(0, 0, 0);
-    
-    // Set as grounded
-    player.isOnGround = true;
-    
-    console.log(`Teleported to position (${x}, ${height + player.height}, ${z})`);
-    
-    // If the player has a camera reference, update it
-    if (player.camera) {
-      player.camera.position.copy(player.position);
+    // Sanity check to ensure valid terrain with getHeightAt method
+    if (!terrain || typeof terrain.getHeightAt !== 'function') {
+      console.error("Invalid terrain object passed to teleportPlayer!");
+      return null;
     }
     
-    return { x, y: height + player.height, z };
+    try {
+      // Get height at the target position
+      const height = terrain.getHeightAt(x, z);
+      
+      if (isNaN(height)) {
+        console.error(`Invalid height value at (${x}, ${z}): ${height}`);
+        return null;
+      }
+      
+      // Safety margin
+      const safetyMargin = 2;
+      
+      // Set player position with proper height
+      player.position.set(x, height + player.height + safetyMargin, z);
+      
+      // Reset velocity to prevent falling
+      player.velocity.set(0, 0, 0);
+      player.isOnGround = true;
+      
+      // Update camera if it exists
+      if (player.camera) {
+        player.camera.position.copy(player.position);
+      }
+      
+      console.log(`Teleported player to (${x.toFixed(1)}, ${player.position.y.toFixed(1)}, ${z.toFixed(1)})`);
+      
+      return {
+        x: player.position.x,
+        y: player.position.y,
+        z: player.position.z
+      };
+    } catch (error) {
+      console.error("Error during teleport:", error);
+      return null;
+    }
   }
   
   // You can call this from your main.js file or add a keyboard shortcut

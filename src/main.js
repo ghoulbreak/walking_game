@@ -15,6 +15,8 @@ async function init() {
   // Get DOM elements
   const fpsDisplay = document.getElementById('fps');
   const positionDisplay = document.getElementById('position');
+  const elevationDisplay = document.getElementById('elevation');
+  const staminaBar = document.getElementById('stamina-bar');
 
   // Create the Three.js scene
   const { scene, camera, renderer } = createScene();
@@ -25,9 +27,9 @@ async function init() {
   
   // Generate procedural terrain using fBm
   console.log("Generating terrain using fBm...");
-  const terrainWidth = 512; // Increased for larger terrain
-  const terrainDepth = 512;
-  const terrainHeight = 80; // Increased for more dramatic mountains
+  const terrainWidth = 1024; // Much larger terrain
+  const terrainDepth = 1024;
+  const terrainHeight = 150; // Significantly increased height for dramatic mountains
   
   const terrain = await generateTerrain(terrainWidth, terrainDepth, terrainHeight);
   scene.add(terrain.mesh);
@@ -65,17 +67,30 @@ async function init() {
       fpsDisplay.textContent = `FPS: ${fps.toFixed(1)}`;
     }
     
-    // Update player position and camera
-    updatePlayer(player, deltaTime, terrain);
-    
-    // Update waypoint system
-    waypointSystem.update(player.position);
-    
     // Update position display
     if (positionDisplay) {
-      const pos = player.position;
-      positionDisplay.textContent = `Position: (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`;
-    }
+        const pos = player.position;
+        positionDisplay.textContent = `Position: (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`;
+      }
+      
+      // Update elevation display
+      if (elevationDisplay && terrain) {
+        const groundHeight = terrain.getHeightAt(player.position.x, player.position.z);
+        elevationDisplay.textContent = `Elevation: ${groundHeight.toFixed(1)}m`;
+      }
+      
+      // Update stamina bar
+      if (staminaBar) {
+        const staminaPercent = (player.stamina.current / player.stamina.max) * 100;
+        staminaBar.style.width = `${staminaPercent}%`;
+        
+        // Change color when stamina is low
+        if (staminaPercent < 30) {
+          staminaBar.classList.add('stamina-low');
+        } else {
+          staminaBar.classList.remove('stamina-low');
+        }
+      }
     
     // Render the scene
     renderer.render(scene, camera);

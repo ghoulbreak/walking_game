@@ -71,12 +71,12 @@ export async function generateTerrain(width, depth, height) {
 function createHeightMapFBM(width, depth, noise2D, heightScale) {
   const heightMap = new Float32Array(width * depth);
   
-  // fBm parameters
-  const octaves = 8;          // Number of layers of noise
-  const persistence = 0.55;   // How much influence each octave has (amplitude factor)
-  const lacunarity = 2.0;     // How much detail is added at each octave (frequency factor)
-  const initialFrequency = 2; // Initial scale of the noise
-  const ridge = 0.9;          // Ridge factor for creating sharper mountain peaks
+   // fBm parameters - adjusted for more dramatic terrain
+   const octaves = 9;          // More octaves for extra detail
+   const persistence = 0.5;    // Slightly reduced persistence for more height variation
+   const lacunarity = 2.1;     // Slightly increased lacunarity for more rugged features
+   const initialFrequency = 1; // Lower initial frequency for larger features
+   const ridge = 0.97;         // Higher ridge factor for sharper mountain peaks
   
   // Seed position offset (can be randomized)
   const offsetX = Math.random() * 100;

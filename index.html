@@ -8,6 +8,7 @@
     body {
       margin: 0;
       overflow: hidden;
+      font-family: Arial, sans-serif;
     }
     canvas {
       width: 100%;
@@ -23,6 +24,28 @@
       padding: 10px;
       font-family: monospace;
       pointer-events: none;
+      border-radius: 5px;
+    }
+    .controls {
+      margin-top: 10px;
+      font-size: 14px;
+    }
+    .stamina-container {
+      width: 200px;
+      height: 15px;
+      background-color: rgba(0, 0, 0, 0.5);
+      margin-top: 8px;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .stamina-bar {
+      height: 100%;
+      background-color: #4CAF50;
+      width: 100%;
+      transition: width 0.2s;
+    }
+    .stamina-low {
+      background-color: #f44336;
     }
   </style>
 </head>
@@ -30,7 +53,11 @@
   <div class="info">
     <div id="fps">FPS: 0</div>
     <div id="position">Position: (0, 0, 0)</div>
-    <div>WASD to move, Mouse to look</div>
+    <div id="elevation">Elevation: 0</div>
+    <div class="controls">WASD to move, SHIFT to sprint, SPACE to jump, Mouse to look</div>
+    <div class="stamina-container">
+      <div id="stamina-bar" class="stamina-bar"></div>
+    </div>
   </div>
   <script type="module" src="/src/main.js"></script>
 </body>

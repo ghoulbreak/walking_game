@@ -1,3 +1,5 @@
+// Updated TerrainRenderer.js with color fixes
+
 import * as THREE from 'three';
 import { calculateGradient, calculateNormal } from '../utils/math.js';
 
@@ -13,16 +15,6 @@ export class TerrainRenderer {
     this.mesh = this.createMesh();
     
     console.log("TerrainRenderer constructor complete, mesh created:", !!this.mesh);
-
-    // Enhance the directional light for more dramatic shadows
-    const sunLight = new THREE.DirectionalLight(0xFFFFDD, 1.2); // Increased intensity
-    sunLight.position.set(150, 200, 80); // Higher angle for longer shadows
-    sunLight.castShadow = true;
-
-    // Improve shadow quality
-    sunLight.shadow.mapSize.width = 4096;  // Increased from 2048
-    sunLight.shadow.mapSize.height = 4096; // Increased from 2048
-    sunLight.shadow.bias = -0.0003; // Adjusted to reduce shadow acne
   }
   
   loadTextures() {
@@ -70,12 +62,12 @@ export class TerrainRenderer {
     // Create vertex colors based on height and slope
     this.applyTerrainColors(geometry, heightMap, width, depth);
     
-    // Create material with vertex colors and improved appearance
+    // CRITICAL FIX: Create material with vertex colors ENABLED
     const material = new THREE.MeshStandardMaterial({
-      vertexColors: true,
+      vertexColors: true,  // CHANGED from false to true
       roughness: 0.8,
       metalness: 0.1,
-      flatShading: false, // Set to true for a more polygonal look
+      flatShading: false,
       side: THREE.FrontSide
     });
     
@@ -84,8 +76,8 @@ export class TerrainRenderer {
     this.mesh.receiveShadow = true;
     this.mesh.castShadow = true;
     
-    // Log mesh creation
-    console.log("Terrain mesh created:", this.mesh);
+    // Log color application
+    console.log("Terrain mesh created with vertex colors ENABLED");
     
     return this.mesh;
   }
@@ -110,8 +102,6 @@ export class TerrainRenderer {
     const colorAttribute = new THREE.BufferAttribute(colors, 3);
     geometry.setAttribute('color', colorAttribute);
 
-    
-    
     const positions = geometry.attributes.position.array;
     
     // Find min and max heights for proper scaling
@@ -123,6 +113,7 @@ export class TerrainRenderer {
     }
     
     const heightRange = maxHeight - minHeight;
+    console.log(`Terrain height range: ${minHeight.toFixed(1)} to ${maxHeight.toFixed(1)}`);
     
     // Terrain type thresholds (normalized 0-1)
     const waterLevel = 0.06;
@@ -172,14 +163,30 @@ export class TerrainRenderer {
         
         // Add slight variation
         const sandVariation = noise * 0.1;
-        color.multiplyScalar(1.0 + sandVariation);
-      } 
-      else if (gradient > midSlopeThreshold) {
-        // Darken color based on slope
-        const shadowFactor = 1.0 - (gradient - midSlopeThreshold) * 0.5;
-        color.multiplyScalar(shadowFactor);
+        color.r = Math.max(0, Math.min(1, color.r * (1.0 + sandVariation)));
+        color.g = Math.max(0, Math.min(1, color.g * (1.0 + sandVariation)));
+        color.b = Math.max(0, Math.min(1, color.b * (1.0 + sandVariation)));
       }
-      
+      else if (gradient > midSlopeThreshold) {
+        // Steep areas - use rock colors based on height
+        if (normalizedHeight > snowLineBase) {
+          // High steep areas - mix of rock and snow
+          const snowMix = Math.max(0, Math.min(1, (normalizedHeight - snowLineBase) / (1 - snowLineBase)));
+          color.copy(this.textures.rockLight).lerp(this.textures.snowDirty, snowMix * (1 - gradient * 0.5));
+        } else if (normalizedHeight > rockLevel) {
+          // Mid-high steep areas - lighter rocks
+          color.copy(this.textures.rockLight);
+        } else {
+          // Lower steep areas - darker rocks
+          color.copy(this.textures.rockDark);
+        }
+        
+        // Darken color based on slope for shadow effect
+        const shadowFactor = 1.0 - (gradient - midSlopeThreshold) * 0.5;
+        color.r *= shadowFactor;
+        color.g *= shadowFactor;
+        color.b *= shadowFactor;
+      }
       else if (normalizedHeight > snowLineBase) {
         // Snow regions - transition from rock to snow
         const snowiness = (normalizedHeight - snowLineBase) / (1 - snowLineBase);
@@ -256,12 +263,20 @@ export class TerrainRenderer {
         color.g = Math.max(0, Math.min(1, color.g + variation));
         color.b = Math.max(0, Math.min(1, color.b + variation));
       }
+      
+      // Apply color to vertex
+      const colorIndex = i * 3;
+      colors[colorIndex] = color.r;
+      colors[colorIndex + 1] = color.g;
+      colors[colorIndex + 2] = color.b;
     }
-}
+    
+    // Log completion of coloring
+    console.log(`Applied terrain colors to ${geometry.attributes.position.count} vertices`);
+  }
   
   update() {
     // This method could be used for terrain animations or updates
-    // For example, waves on water surfaces or swaying grass
   }
   
   // Method to get the mesh for adding to scene

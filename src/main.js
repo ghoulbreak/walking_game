@@ -16,6 +16,27 @@ let fps = 0;
 // Current terrain profile
 let currentProfile = defaultProfile;
 
+// Add the debug function somewhere at the top level of main.js
+function debugTerrainObject(terrain, label = "Terrain") {
+    console.group(`${label} Debug Info`);
+    console.log("Has mesh:", !!terrain.mesh);
+    console.log("Has heightMap:", !!terrain.heightMap);
+    console.log("heightMap length:", terrain.heightMap ? terrain.heightMap.length : "N/A");
+    console.log("Has getHeightAt function:", typeof terrain.getHeightAt === "function");
+    
+    // Test getHeightAt at origin
+    if (typeof terrain.getHeightAt === "function") {
+      try {
+        const centerHeight = terrain.getHeightAt(0, 0);
+        console.log("Height at (0,0):", centerHeight);
+      } catch (e) {
+        console.error("Error getting height at (0,0):", e);
+      }
+    }
+    
+    console.groupEnd();
+  }
+
 // Initialize the application
 async function init() {
   // Get DOM elements
@@ -73,42 +94,77 @@ async function init() {
   const waypoints = waypointSystem.generateWaypoints(8); // Generate 8 waypoints
   
   // Function to regenerate terrain with a new profile
-  async function regenerateTerrain(profileName) {
+  // The fixed regenerateTerrain function
+async function regenerateTerrain(profileName) {
     console.log(`Regenerating terrain with ${profileName} profile...`);
     
-    // Remove old terrain and waypoints
-    scene.remove(terrain.mesh);
-    waypointSystem.clearWaypoints();
+    // Debug terrain before regeneration
+    debugTerrainObject(terrain, "Before regeneration");
     
-    // Generate new terrain
-    currentProfile = profileName;
-    const newTerrain = await generateTerrain(terrainWidth, terrainDepth, terrainHeight, profileName);
-    scene.add(newTerrain.mesh);
-    
-    // Update player terrain reference and position
+    // Store current player position
     const playerX = player.position.x;
     const playerZ = player.position.z;
-    const newHeight = newTerrain.getHeightAt(playerX, playerZ) + player.height + 2;
-    player.position.y = newHeight;
     
-    // Update references
-    terrain.mesh = newTerrain.mesh;
-    terrain.heightMap = newTerrain.heightMap;
-    terrain.profile = newTerrain.profile;
+    // Remove old terrain mesh from scene
+    scene.remove(terrain.mesh);
     
-    // Regenerate waypoints
-    waypointSystem.terrain = newTerrain;
-    waypointSystem.generateWaypoints(8);
+    // Clear any waypoints
+    if (waypointSystem) {
+      waypointSystem.clearWaypoints();
+    }
     
-    console.log("Terrain regenerated successfully");
+    // Generate new terrain with selected profile
+    currentProfile = profileName;
+    const newTerrain = await generateTerrain(terrainWidth, terrainDepth, terrainHeight, profileName);
+    
+    // Add new terrain to scene
+    scene.add(newTerrain.mesh);
+    
+    // CRITICAL FIX: Replace the entire terrain object with newTerrain
+    // Using Object.assign ensures ALL properties and methods are copied
+    Object.assign(terrain, newTerrain);
+    
+    // Debug terrain after regeneration to verify it's correct
+    debugTerrainObject(terrain, "After regeneration");
+    
+    // Now get the correct height at player's position
+    const heightAtPlayerPos = terrain.getHeightAt(playerX, playerZ);
+    console.log(`Height at player position (${playerX.toFixed(1)}, ${playerZ.toFixed(1)}): ${heightAtPlayerPos.toFixed(1)}`);
+    
+    const safetyMargin = 2; // Extra units above terrain
+    
+    // Position player safely above the new terrain
+    player.position.y = heightAtPlayerPos + player.height + safetyMargin;
+    
+    // Reset velocity to prevent falling through terrain
+    player.velocity.set(0, 0, 0);
+    player.isOnGround = true;
+    
+    // Update camera position
+    if (player.camera) {
+      player.camera.position.copy(player.position);
+    }
+    
+    // Regenerate waypoints with the updated terrain
+    if (waypointSystem) {
+      // Ensure waypoint system uses the same terrain reference
+      waypointSystem.terrain = terrain;
+      waypointSystem.generateWaypoints(8);
+    }
+    
+    console.log(`Terrain regenerated with ${profileName} profile`);
+    console.log(`Player positioned at (${playerX.toFixed(1)}, ${player.position.y.toFixed(1)}, ${playerZ.toFixed(1)})`);
   }
   
-  // Setup profile selector change event
+  // Now make sure this function gets USED in two places:
+  
+  // 1. In the init function, update the profile selector event listener:
   if (profileSelect) {
     profileSelect.addEventListener('change', (e) => {
       regenerateTerrain(e.target.value);
     });
   }
+  
   
   // Add profile switching with number keys (1-5)
   document.addEventListener('keydown', (event) => {

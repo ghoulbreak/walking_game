@@ -234,15 +234,15 @@ function applyHeightMap(geometry, heightMap, width, depth) {
 }
 
 function createTerrainMaterial() {
-  // Create material with vertex colors based on height and slope
-  return new THREE.MeshStandardMaterial({
-    color: 0x3b7d4e,      // Base color (green)
-    flatShading: false,    // Smooth shading
-    metalness: 0.0,
-    roughness: 0.8,
-    vertexColors: false    // We'll set colors in renderer.js
-  });
-}
+    // CRITICAL FIX: Enable vertexColors to show the calculated colors
+    return new THREE.MeshStandardMaterial({
+      color: 0xffffff,     // Use white as base (multiplies with vertex colors)
+      flatShading: false,  // Smooth shading
+      metalness: 0.0,
+      roughness: 0.8,
+      vertexColors: true   // CHANGED: Enable vertex colors
+    });
+  }
 
 // Function to generate waypoints along ridges
 export function generateWaypoints(terrain, count = 10) {

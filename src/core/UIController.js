@@ -9,12 +9,39 @@ export class UIController {
      * Create a new UIController
      */
     constructor() {
+      // Ensure DOM is ready before creating UI elements
+      if (document.readyState === 'loading') {
+        // Document still loading, wait for it to be ready
+        document.addEventListener('DOMContentLoaded', () => {
+          this._initializeUI();
+        });
+      } else {
+        // Document already loaded, proceed immediately
+        this._initializeUI();
+      }
+    }
+
+    // New helper method to initialize UI
+    _initializeUI() {
       // Create and cache UI elements
       this.createUIElements();
       
       // Get references to existing elements
       this.getUIReferences();
+      
+      console.log("UI Initialized. Loading screen element exists:", !!this.loadingScreen);
+      
+      // Verify loading screen elements were found
+      if (!this.loadingScreen || !this.loadingBar || !this.loadingText) {
+        console.error("Loading screen elements not found, trying again");
+        // Wait a bit and try again - DOM might not be fully ready
+        setTimeout(() => {
+          this.getUIReferences();
+          console.log("Retry: Loading screen element exists:", !!this.loadingScreen);
+        }, 100);
+      }
     }
+  
     
     /**
      * Create necessary UI elements
@@ -266,17 +293,31 @@ export class UIController {
       }
     }
     
-    /**
-     * Hide the loading screen
-     */
+    // Modified hideLoadingScreen method for more direct DOM manipulation
     hideLoadingScreen() {
-      if (this.loadingScreen) {
-        this.loadingScreen.style.opacity = '0';
-        this.loadingScreen.style.transition = 'opacity 0.5s';
+      console.log("Attempting to hide loading screen");
+      
+      // Try getting a direct reference if our cached reference is missing
+      const loadingScreen = this.loadingScreen || document.getElementById('loading-screen');
+      
+      if (loadingScreen) {
+        console.log("Loading screen found, hiding it now");
+        
+        // Force style update with !important
+        loadingScreen.style.cssText = `
+          opacity: 0 !important; 
+          transition: opacity 0.5s !important;
+        `;
         
         setTimeout(() => {
-          this.loadingScreen.style.display = 'none';
+          loadingScreen.style.cssText = `
+            opacity: 0 !important;
+            display: none !important;
+          `;
+          console.log("Loading screen hidden (display: none applied)");
         }, 500);
+      } else {
+        console.error("Loading screen element not found even with direct query");
       }
     }
     
@@ -286,14 +327,28 @@ export class UIController {
      * @param {string} message - Loading message to display
      */
     updateLoadingProgress(progress, message) {
-      if (this.loadingBar) {
-        this.loadingBar.style.width = `${progress}%`;
+      console.log(`Loading progress: ${progress}%, message: ${message}`);
+      
+      // Use direct element references as fallback
+      const loadingBar = this.loadingBar || document.getElementById('loading-bar');
+      const loadingText = this.loadingText || document.getElementById('loading-text');
+      
+      if (loadingBar) {
+        // Force style update with !important
+        loadingBar.style.cssText = `width: ${progress}% !important; transition: width 0.3s;`;
+        console.log(`Set loading bar width to ${progress}%`);
+      } else {
+        console.error("loadingBar element not found even with direct query");
       }
       
-      if (message && this.loadingText) {
-        this.loadingText.textContent = message;
+      if (message && loadingText) {
+        loadingText.textContent = message;
+        console.log(`Updated loading text to: ${message}`);
+      } else if (message) {
+        console.error("loadingText element not found even with direct query");
       }
     }
+    
     
     /**
      * Show a temporary notification

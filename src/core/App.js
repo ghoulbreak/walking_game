@@ -63,11 +63,8 @@ export class App {
     
     // Generate terrain
     this.uiController.updateLoadingProgress(30, "Generating terrain...");
-    console.log("About to initialize terrain");
     this.terrain = new TerrainManager(this.scene);
-    console.log("Created terrain manager");
     await this.terrain.initialize(this.activeProfile);
-    console.log("Terrain initialization complete");
     
     // Create terrain interface object for player and waypoints
     const terrainInterface = {
@@ -75,34 +72,58 @@ export class App {
       isRidge: (x, z, threshold) => this.terrain.isRidge(x, z, threshold),
       profile: this.activeProfile
     };
-    console.log("Terrain interface created");
     
     // Make terrain accessible globally (for backward compatibility)
     window.terrain = terrainInterface;
-    console.log("Making terrain accessible globally");
+    
     // Initialize player
     this.uiController.updateLoadingProgress(80, "Setting up player...");
-    console.log("init the player");
     this.initializePlayer(terrainInterface);
-    console.log("player initiated");
+    
     // Initialize input controller
     this.inputController = new InputController(this.player, this.camera);
-    console.log("input initiated");
+    
     // Initialize waypoint system
     this.uiController.updateLoadingProgress(90, "Creating waypoints...");
     this.waypointSystem = new WaypointSystem(this.scene, terrainInterface);
     this.waypointSystem.generateWaypoints(8, this.player.position);
-    console.log("waypoints initiated");
+    
     // Set up keyboard shortcuts
     this.setupKeyboardShortcuts();
     
     // Complete loading
     this.uiController.updateLoadingProgress(100, "Ready!");
-    console.log("ready?");
+    
     // Start the game after a short delay
     return new Promise(resolve => {
       setTimeout(() => {
+        // Try multiple approaches to ensure loading screen is hidden
         this.uiController.hideLoadingScreen();
+        
+        // Aggressive backup approach - directly manipulate DOM
+        const loadingScreen = document.getElementById('loading-screen');
+        if (loadingScreen) {
+          console.log("Force-hiding loading screen as backup");
+          // Force immediate hide with inline styles
+          loadingScreen.style.cssText = `
+            opacity: 0 !important;
+            display: none !important;
+            visibility: hidden !important;
+            z-index: -1 !important;
+          `;
+        }
+        
+        // Additional check - remove the element entirely if still visible
+        setTimeout(() => {
+          const stillVisibleScreen = document.getElementById('loading-screen');
+          if (stillVisibleScreen && 
+              (getComputedStyle(stillVisibleScreen).display !== 'none' || 
+              getComputedStyle(stillVisibleScreen).opacity !== '0')) {
+            console.log("Loading screen still visible, removing it from DOM");
+            stillVisibleScreen.parentNode.removeChild(stillVisibleScreen);
+          }
+        }, 1000);
+        
         resolve();
       }, 1000);
     });

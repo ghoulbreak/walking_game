@@ -8,7 +8,7 @@ export class TerrainChunkManager {
     this.scene = scene;
     this.chunkSize = chunkSize;          // Size of each chunk
     this.viewDistance = viewDistance;    // How many chunks to render in each direction
-    this.heightScale = 150;              // Height scale for all chunks
+    this.heightScale = 1500;              // Height scale for all chunks
     this.chunks = new Map();             // Map of loaded chunks (key: 'x,z')
     this.currentChunk = { x: 0, z: 0 };  // Current chunk the player is in
     this.activeProfile = 'appalachian';  // Current terrain profile

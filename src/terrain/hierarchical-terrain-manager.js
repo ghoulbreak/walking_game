@@ -171,6 +171,39 @@ export class HierarchicalTerrainManager {
     await this.generateChunksAroundPosition(this.currentChunk.x, this.currentChunk.z);
   }
 
+  // Unload a chunk by key
+unloadChunk(key) {
+  const chunk = this.microChunks.get(key);
+  if (!chunk) return;
+  
+  // Remove from scene
+  this.chunksContainer.remove(chunk.mesh);
+  
+  // Dispose of geometry and materials
+  if (chunk.mesh.geometry) chunk.mesh.geometry.dispose();
+  if (chunk.mesh.material) {
+    if (Array.isArray(chunk.mesh.material)) {
+      chunk.mesh.material.forEach(m => m.dispose());
+    } else {
+      chunk.mesh.material.dispose();
+    }
+  }
+  
+  // Remove debug marker if present
+  if (this.debugMode && this.debugMarkers[key]) {
+    this.scene.remove(this.debugMarkers[key]);
+    delete this.debugMarkers[key];
+    
+    if (this.debugMarkers[key + '_label']) {
+      this.scene.remove(this.debugMarkers[key + '_label']);
+      delete this.debugMarkers[key + '_label'];
+    }
+  }
+  
+  // Remove from map
+  this.microChunks.delete(key);
+}
+
   // Generate height using multi-scale composition
   generateMultiScaleHeight(worldX, worldZ, profileParams) {
     let totalHeight = 0;
@@ -949,6 +982,7 @@ export class HierarchicalTerrainManager {
   }
 
   // Add this method to the HierarchicalTerrainManager class
+// Add this method to the HierarchicalTerrainManager class
 getHeightAt(worldX, worldZ) {
   // Try to get height from the correct chunk
   const chunkX = Math.floor(worldX / this.microSize);
@@ -975,6 +1009,76 @@ getHeightAt(worldX, worldZ) {
   // If no chunk is loaded or point is outside all chunks,
   // fall back to macro terrain
   return this.getInterpolatedMacroHeight(worldX, worldZ);
+}
+
+// Update chunks based on player position
+updatePlayerPosition(worldX, worldZ) {
+  // Calculate which chunk this position belongs to
+  const chunkX = Math.floor(worldX / this.microSize);
+  const chunkZ = Math.floor(worldZ / this.microSize);
+  
+  // Check if player moved to a new chunk
+  if (chunkX !== this.currentChunk.x || chunkZ !== this.currentChunk.z) {
+    this.currentChunk = { x: chunkX, z: chunkZ };
+    this.generateChunksAroundPosition(chunkX, chunkZ);
+  }
+}
+
+// Check if a point is on a ridge
+isRidge(worldX, worldZ, threshold = 5) {
+  // Calculate slope in surrounding area
+  const sampleDist = 2.0;
+  const h = this.getHeightAt(worldX, worldZ);
+  
+  if (h === null) return false;
+  
+  const hN = this.getHeightAt(worldX, worldZ - sampleDist);
+  const hS = this.getHeightAt(worldX, worldZ + sampleDist);
+  const hE = this.getHeightAt(worldX + sampleDist, worldZ);
+  const hW = this.getHeightAt(worldX - sampleDist, worldZ);
+  
+  if (hN === null || hS === null || hE === null || hW === null) return false;
+  
+  const horizontalDiff = (h - hE) * (h - hW);
+  const verticalDiff = (h - hN) * (h - hS);
+  
+  // Detect ridge points (local maxima in at least one direction)
+  return (horizontalDiff > 0 && Math.abs(verticalDiff) < threshold) || 
+         (verticalDiff > 0 && Math.abs(horizontalDiff) < threshold);
+}
+
+// Get all loaded terrain chunks
+getLoadedChunks() {
+  return Array.from(this.microChunks.values());
+}
+
+// Set the view distance (in chunks)
+setViewDistance(distance) {
+  if (distance === this.viewDistance) return;
+  
+  this.viewDistance = Math.max(1, Math.min(8, distance));
+  this.generateChunksAroundPosition(this.currentChunk.x, this.currentChunk.z);
+}
+
+// Toggle debug visualization
+toggleDebug() {
+  this.debugMode = !this.debugMode;
+  
+  if (this.debugMode) {
+    // Add debug markers for all chunks
+    for (const [key] of this.microChunks) {
+      const [x, z] = key.split(',').map(Number);
+      this.addDebugMarker(x, z);
+    }
+  } else {
+    // Remove all debug markers
+    for (const key in this.debugMarkers) {
+      this.scene.remove(this.debugMarkers[key]);
+    }
+    this.debugMarkers = {};
+  }
+  
+  return this.debugMode;
 }
 
 }

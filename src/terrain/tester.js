@@ -1,37 +1,33 @@
 // src/terrain/tester.js
-// Utility for testing and comparing different terrain profiles
 import * as THREE from 'three';
 import { createNoise2D } from 'simplex-noise';
-import { TerrainProfiles, getProfile, blendProfiles } from './profiles.js';
+import { TerrainProfiles, getProfile } from './profiles.js';
 
 // Create a small terrain sample with the given profile
 export function createTerrainSample(width = 256, depth = 256, height = 50, profileName) {
   const profile = getProfile(profileName);
   const params = profile.params;
   
-  // Create a noise generator
+  // Create noise generator
   const noise2D = createNoise2D();
   
   // Create geometry
-  const geometry = new THREE.PlaneGeometry(width, depth, 100, 100); // Lower resolution for preview
-  geometry.rotateX(-Math.PI / 2); // Rotate to be horizontal
+  const geometry = new THREE.PlaneGeometry(width, depth, 100, 100);
+  geometry.rotateX(-Math.PI / 2);
   
   // Create heightmap using profile parameters
   const heightMap = createSampleHeightMap(width, depth, noise2D, height, params);
   
   // Apply heightmap to geometry
-  applyHeightMap(geometry, heightMap, width, depth);
-  
-  // Calculate normals for proper lighting
+  applyHeightMap(geometry, heightMap);
   geometry.computeVertexNormals();
   
-  // Create material with wireframe for better visualization
+  // Create material
   const material = new THREE.MeshStandardMaterial({
     color: 0x3b7d4e,
     flatShading: false,
     metalness: 0.0,
-    roughness: 0.8,
-    wireframe: false
+    roughness: 0.8
   });
   
   // Create mesh
@@ -121,11 +117,6 @@ export function createComparisonScene() {
     });
   });
   
-  // Add orbit controls for camera
-  // Note: This requires OrbitControls.js from Three.js examples
-  // const controls = new OrbitControls(camera, renderer.domElement);
-  // controls.enableDamping = true;
-  
   // Animate function to render scene
   function animate() {
     requestAnimationFrame(animate);
@@ -147,7 +138,6 @@ export function createComparisonScene() {
       sample.label.style.top = y + 'px';
     });
     
-    // controls.update();
     renderer.render(scene, camera);
   }
   
@@ -169,27 +159,27 @@ export function createComparisonScene() {
   };
 }
 
-// Simplified heightmap creation for sample previews
+// Create a sample heightmap
 function createSampleHeightMap(width, depth, noise2D, heightScale, params) {
   const heightMap = new Float32Array(width * depth);
-  
-  // Use profile parameters
-  const octaves = params.octaves;
-  const persistence = params.persistence;
-  const lacunarity = params.lacunarity;
-  const initialFrequency = params.initialFrequency;
-  const ridge = params.ridge;
-  const exponent = params.exponent;
-  const finalHeightScale = heightScale * (params.heightScale / 100);
+  const {
+    octaves = 6,
+    persistence = 0.5,
+    lacunarity = 2.0,
+    initialFrequency = 1.0,
+    ridge = 0.8,
+    exponent = 2.0,
+    heightScale: profileScale = 100,
+    smoothingPasses = 0
+  } = params;
   
   // Use fixed seed for consistent comparison
   const offsetX = 42;
   const offsetZ = 42;
   
-  // Fill height map
+  // Create heightmap
   for (let z = 0; z < depth; z++) {
     for (let x = 0; x < width; x++) {
-      // Calculate noise coordinates
       const nx = x / width;
       const nz = z / depth;
       
@@ -220,7 +210,7 @@ function createSampleHeightMap(width, depth, noise2D, heightScale, params) {
       // Normalize and apply transformations
       noiseHeight /= normalization;
       noiseHeight = Math.pow(noiseHeight, exponent);
-      noiseHeight *= finalHeightScale;
+      noiseHeight *= heightScale * (profileScale / 100);
       
       // Store in heightmap
       heightMap[z * width + x] = noiseHeight;
@@ -228,88 +218,73 @@ function createSampleHeightMap(width, depth, noise2D, heightScale, params) {
   }
   
   // Apply smoothing if specified
-  if (params.smoothingPasses && params.smoothingPasses > 0) {
-    // Simple box blur for smoothing
-    const smoothed = new Float32Array(heightMap.length);
-    
-    for (let pass = 0; pass < params.smoothingPasses; pass++) {
-      for (let z = 0; z < depth; z++) {
-        for (let x = 0; x < width; x++) {
-          let sum = 0;
-          let count = 0;
-          
-          // 3x3 kernel
-          for (let dz = -1; dz <= 1; dz++) {
-            for (let dx = -1; dx <= 1; dx++) {
-              const nx = x + dx;
-              const nz = z + dz;
-              
-              if (nx >= 0 && nx < width && nz >= 0 && nz < depth) {
-                sum += heightMap[nz * width + nx];
-                count++;
-              }
+  if (smoothingPasses > 0) {
+    return applySmoothing(heightMap, width, depth, smoothingPasses);
+  }
+  
+  return heightMap;
+}
+
+// Apply smoothing to heightmap
+function applySmoothing(heightMap, width, depth, passes) {
+  const smoothed = new Float32Array(heightMap.length);
+  
+  for (let pass = 0; pass < passes; pass++) {
+    for (let z = 0; z < depth; z++) {
+      for (let x = 0; x < width; x++) {
+        let sum = 0;
+        let count = 0;
+        
+        // 3x3 kernel
+        for (let dz = -1; dz <= 1; dz++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx;
+            const nz = z + dz;
+            
+            if (nx >= 0 && nx < width && nz >= 0 && nz < depth) {
+              sum += heightMap[nz * width + nx];
+              count++;
             }
           }
-          
-          smoothed[z * width + x] = sum / count;
         }
+        
+        smoothed[z * width + x] = sum / count;
       }
-      
-      // Copy back for next pass
-      for (let i = 0; i < heightMap.length; i++) {
-        heightMap[i] = smoothed[i];
-      }
+    }
+    
+    // Copy back for next pass
+    for (let i = 0; i < heightMap.length; i++) {
+      heightMap[i] = smoothed[i];
     }
   }
   
   return heightMap;
 }
 
-function applyHeightMap(geometry, heightMap, width, depth) {
+// Apply heightmap to geometry
+function applyHeightMap(geometry, heightMap) {
   const vertices = geometry.attributes.position.array;
-  const vertexCount = vertices.length / 3;
   
-  // Map each vertex to the appropriate heightmap point
-  for (let i = 0; i < vertexCount; i++) {
-    // Get vertex X and Z positions
-    const vertexX = vertices[i * 3];
-    const vertexZ = vertices[i * 3 + 2];
-    
-    // Convert to heightmap indices
-    const nx = (vertexX / width + 0.5);
-    const nz = (vertexZ / depth + 0.5);
-    
-    const ix = Math.floor(nx * width);
-    const iz = Math.floor(nz * depth);
-    
-    // Clamp to valid indices
-    const clampedIx = Math.max(0, Math.min(width - 1, ix));
-    const clampedIz = Math.max(0, Math.min(depth - 1, iz));
-    
-    // Get height from heightmap
-    const height = heightMap[clampedIz * width + clampedIx];
-    
-    // Apply height to vertex
-    vertices[i * 3 + 1] = height;
+  for (let i = 0; i < vertices.length / 3; i++) {
+    vertices[i * 3 + 1] = heightMap[i];
   }
   
-  // Update position attribute
   geometry.attributes.position.needsUpdate = true;
-  
   return geometry;
 }
 
 // Function to launch the terrain comparison utility
 export function launchTerrainComparison() {
-  // Create a new page or overlay for the comparison
+  // Save original content
   const originalContent = document.body.innerHTML;
+  
+  // Create comparison UI
   document.body.innerHTML = `
     <div id="terrain-comparison">
       <div class="comparison-header">
         <h1>Terrain Profile Comparison</h1>
         <button id="back-button">Return to Simulator</button>
       </div>
-      <div id="terrain-samples"></div>
     </div>
   `;
   

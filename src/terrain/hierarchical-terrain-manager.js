@@ -1,4 +1,3 @@
-// src/terrain/hierarchical-terrain-manager.js
 import * as THREE from 'three';
 import { createNoise2D } from 'simplex-noise';
 import { getProfile } from './profiles.js';
@@ -12,6 +11,30 @@ export class HierarchicalTerrainManager {
     this.microSize = 256;            // World size of each micro chunk
     this.viewDistance = 3;           // How many micro chunks to render in each direction
     this.heightScale = 150;          // Overall height scale
+
+    // Multi-scale terrain noise layers
+    this.noiseScales = [
+      { scale: 0.0005, weight: 0.65, octaves: 4 }, // Macro scale - large landforms
+      { scale: 0.002, weight: 0.25, octaves: 3 },  // Medium scale - mountain groups
+      { scale: 0.008, weight: 0.1, octaves: 2 }    // Small scale - local features
+    ];
+
+    // Elevation zones for biome stratification
+    this.elevationZones = [
+      { threshold: 0.15, name: "water" },
+      { threshold: 0.35, name: "lowlands" },
+      { threshold: 0.6, name: "foothills" },
+      { threshold: 0.8, name: "mountains" },
+      { threshold: 1.0, name: "peaks" }
+    ];
+
+    // Nonlinear height scaling parameters
+    this.nonlinearScaling = {
+      enabled: true,
+      exponent: 2.2,      // Higher values make peaks more extreme
+      inflection: 0.6,    // Point at which the curve accelerates (0-1)
+      flatteningFactor: 0.7 // Controls how much low areas are flattened (0-1)
+    };
 
     // Terrain data structures
     this.macroTerrain = null;        // Level A terrain (low resolution, large area)
@@ -31,13 +54,22 @@ export class HierarchicalTerrainManager {
     
     // Use a seeded noise for deterministic generation
     this.seed = Math.random() * 10000; // Global seed for the world
-    this.macroNoise = createNoise2D();
-    this.microNoise = createNoise2D();
+    this.createNoiseGenerators();
     
     // Water level for more consistent water across chunks
     this.waterLevel = 1; 
   }
   
+  // Create noise generators for different scales
+  createNoiseGenerators() {
+    this.noiseGenerators = [];
+    for (let i = 0; i < this.noiseScales.length; i++) {
+      this.noiseGenerators.push(createNoise2D());
+    }
+    // Additional noise for detail variations
+    this.detailNoise = createNoise2D();
+  }
+
   // Initialize the terrain system
   async initialize(profileName = 'appalachian') {
     this.activeProfile = profileName;
@@ -63,20 +95,15 @@ export class HierarchicalTerrainManager {
     return new Promise(resolve => {
       // Allow UI to update by using setTimeout with 0 delay
       setTimeout(() => {
-        // Generate macro terrain using simplified noise
+        // Generate macro terrain using multi-scale composition
         for (let z = 0; z < this.macroResolution; z++) {
           for (let x = 0; x < this.macroResolution; x++) {
             const worldX = (x - this.macroResolution / 2) * cellSize;
             const worldZ = (z - this.macroResolution / 2) * cellSize;
             
-            // Use a consistent noise scale to avoid repeating patterns
-            const nx = worldX * 0.0005 + this.seed;
-            const nz = worldZ * 0.0005 + this.seed;
-            
-            // Simplified noise for macro terrain - fewer octaves for speed
-            const params = {...profile.params, octaves: 4};
-            heightMap[z * this.macroResolution + x] = this.generateHeightValue(
-              nx, nz, this.macroNoise, params, this.heightScale * 0.8
+            // Use multi-scale composition for more realistic landforms
+            heightMap[z * this.macroResolution + x] = this.generateMultiScaleHeight(
+              worldX, worldZ, profile.params
             );
           }
         }
@@ -92,6 +119,115 @@ export class HierarchicalTerrainManager {
         resolve();
       }, 0);
     });
+  }
+  
+  // Change the active terrain profile
+  async changeProfile(profileName) {
+    this.activeProfile = profileName;
+    
+    // Generate a new seed for this profile
+    this.seed = Math.random() * 10000;
+    
+    // Recreate noise generators for consistent generation
+    this.createNoiseGenerators();
+    
+    // Clear all existing chunks
+    for (const key of this.microChunks.keys()) {
+      this.unloadChunk(key);
+    }
+    
+    // Regenerate macro terrain
+    await this.generateMacroTerrain();
+    
+    // Regenerate visible chunks
+    await this.generateChunksAroundPosition(this.currentChunk.x, this.currentChunk.z);
+  }
+  
+  // Set the nonlinear scaling parameters
+  setNonlinearScaling(enabled, exponent = 2.2, inflection = 0.6, flatteningFactor = 0.7) {
+    this.nonlinearScaling = {
+      enabled,
+      exponent,
+      inflection,
+      flatteningFactor
+    };
+    
+    // Regenerate terrain with new scaling
+    this.regenerateTerrain();
+  }
+  
+  // Regenerate all terrain with current settings
+  async regenerateTerrain() {
+    // Clear and regenerate macro terrain
+    this.macroTerrain = null;
+    await this.generateMacroTerrain();
+    
+    // Clear all chunks
+    for (const key of this.microChunks.keys()) {
+      this.unloadChunk(key);
+    }
+    
+    // Regenerate visible chunks
+    await this.generateChunksAroundPosition(this.currentChunk.x, this.currentChunk.z);
+  }
+
+  // Generate height using multi-scale composition
+  generateMultiScaleHeight(worldX, worldZ, profileParams) {
+    let totalHeight = 0;
+    let totalWeight = 0;
+    
+    // Apply noise at each scale
+    for (let i = 0; i < this.noiseScales.length; i++) {
+      const scale = this.noiseScales[i];
+      const nx = worldX * scale.scale + this.seed;
+      const nz = worldZ * scale.scale + this.seed;
+      
+      // Adjust parameters based on scale
+      const scaleParams = {...profileParams};
+      scaleParams.octaves = Math.min(profileParams.octaves, scale.octaves);
+      
+      // Generate height for this scale
+      const heightAtScale = this.generateHeightValue(
+        nx, nz, this.noiseGenerators[i], scaleParams, this.heightScale
+      );
+      
+      // Add weighted contribution
+      totalHeight += heightAtScale * scale.weight;
+      totalWeight += scale.weight;
+    }
+    
+    // Normalize by total weight
+    const normalizedHeight = totalHeight / totalWeight;
+    
+    // Apply nonlinear scaling to exaggerate peaks
+    return this.applyNonlinearScaling(normalizedHeight, profileParams);
+  }
+  
+  // Apply nonlinear scaling to the height value to exaggerate peaks
+  applyNonlinearScaling(height, profileParams) {
+    if (!this.nonlinearScaling.enabled) return height;
+    
+    // Normalize height to 0-1 range (based on max expected height)
+    const maxExpectedHeight = this.heightScale * 1.2; // Allow some headroom
+    const normalizedHeight = height / maxExpectedHeight;
+    
+    // Apply sigmoid-like function to exaggerate high areas (mountain peaks)
+    // and potentially flatten low areas
+    const { exponent, inflection, flatteningFactor } = this.nonlinearScaling;
+    
+    let scaledHeight;
+    if (normalizedHeight < inflection) {
+      // Below inflection point - can be flattened
+      scaledHeight = normalizedHeight * flatteningFactor / inflection;
+    } else {
+      // Above inflection point - exaggerate based on exponent
+      const t = (normalizedHeight - inflection) / (1.0 - inflection);
+      const exaggeration = Math.pow(t, exponent);
+      scaledHeight = flatteningFactor + (1.0 - flatteningFactor) * exaggeration;
+    }
+    
+    // Scale back to original range
+    return scaledHeight * maxExpectedHeight;
   }
   
   // Generate a single height value using FBM noise
@@ -149,13 +285,8 @@ export class HierarchicalTerrainManager {
     // Check bounds
     if (x < 0 || x >= resolution || z < 0 || z >= resolution) {
       // For positions outside the macro terrain, generate height on-the-fly
-      // This ensures we can go beyond macro terrain boundaries
-      const nx = worldX * 0.0005 + this.seed;
-      const nz = worldZ * 0.0005 + this.seed;
-      
       const profile = getProfile(this.activeProfile);
-      const params = {...profile.params, octaves: 4};
-      return this.generateHeightValue(nx, nz, this.macroNoise, params, this.heightScale * 0.8);
+      return this.generateMultiScaleHeight(worldX, worldZ, profile.params);
     }
     
     return heightMap[z * resolution + x];
@@ -189,12 +320,8 @@ export class HierarchicalTerrainManager {
     
     if (!validIndices) {
       // For positions outside or on the edge of the macro terrain, fall back to direct generation
-      const nx = worldX * 0.0005 + this.seed;
-      const nz = worldZ * 0.0005 + this.seed;
-      
       const profile = getProfile(this.activeProfile);
-      const params = {...profile.params, octaves: 4};
-      return this.generateHeightValue(nx, nz, this.macroNoise, params, this.heightScale * 0.8);
+      return this.generateMultiScaleHeight(worldX, worldZ, profile.params);
     }
     
     // Get the four surrounding heights
@@ -306,7 +433,7 @@ export class HierarchicalTerrainManager {
     });
   }
   
-  // Generate a micro heightmap for a chunk, based on macro terrain
+  // Generate a micro heightmap for a chunk, using elevation-dependent parameters
   generateMicroHeightMap(chunkX, chunkZ, worldX, worldZ) {
     const profile = getProfile(this.activeProfile);
     const heightMap = new Float32Array(this.microResolution * this.microResolution);
@@ -399,28 +526,24 @@ export class HierarchicalTerrainManager {
           blendFactor = 0.8 + (0.1 - edgeDistance) / 0.1 * 0.2; // up to 100% macro at very edge
         }
         
-        // Add detail using noise with uniqueness per chunk
+        // Determine which elevation zone this point belongs to
+        const normalizedMacroHeight = (baseHeight - macroMinHeight) / 
+                                      (macroMaxHeight - macroMinHeight || 1);
+        
+        const elevationZone = this.getElevationZone(normalizedMacroHeight);
+        
+        // Add detail using elevation-dependent noise params
+        const detailParams = this.getDetailParamsForElevation(elevationZone, profile.params);
+        
         // Scale coordinates for detail noise (higher frequency)
         const nx = vertexWorldX * 0.02 + detailSeed;
         const nz = vertexWorldZ * 0.02 + detailSeed;
         
-        // Add detail scale variation based on macro terrain
-        const macroHeight = this.getInterpolatedMacroHeight(vertexWorldX, vertexWorldZ);
-        const normalizedMacroHeight = (macroHeight - macroMinHeight) / (macroMaxHeight - macroMinHeight);
-        
-        // Less detail on very low (water) and very high (mountain peaks) areas
-        let detailScale = 1.0;
-        if (normalizedMacroHeight < 0.2) {
-          // Reduce detail in low areas (potential water)
-          detailScale = normalizedMacroHeight / 0.2;
-        } else if (normalizedMacroHeight > 0.8) {
-          // Reduce detail on mountain peaks
-          detailScale = 1.0 - (normalizedMacroHeight - 0.8) / 0.2;
-        }
-        
-        // Calculate detail noise
-        const detailParams = {...profile.params, octaves: 3, initialFrequency: 2.0, persistence: 0.6};
-        const detailHeight = this.generateHeightValue(nx, nz, this.microNoise, detailParams, this.heightScale * 0.2);
+        // Calculate detail noise with zone-appropriate parameters
+        const detailHeight = this.generateHeightValue(
+          nx, nz, this.detailNoise, detailParams, 
+          this.heightScale * detailParams.detailScale
+        );
         
         // Calculate slope for detail attenuation
         const slopeFactor = this.calculateMacroSlope(vertexWorldX, vertexWorldZ);
@@ -428,7 +551,7 @@ export class HierarchicalTerrainManager {
         
         // Combine macro and detail with weight
         const finalHeight = baseHeight * blendFactor + 
-                          detailHeight * detailScale * slopeAttenuationFactor * (1 - blendFactor);
+                          detailHeight * slopeAttenuationFactor * (1 - blendFactor);
         
         // Store in heightmap
         heightMap[z * this.microResolution + x] = finalHeight;
@@ -439,6 +562,75 @@ export class HierarchicalTerrainManager {
     this.applyHeightmapPostProcessing(heightMap, this.microResolution);
     
     return heightMap;
+  }
+  
+  // Determine which elevation zone a point belongs to
+  getElevationZone(normalizedHeight) {
+    for (const zone of this.elevationZones) {
+      if (normalizedHeight <= zone.threshold) {
+        return zone.name;
+      }
+    }
+    return "peaks"; // Default to peaks if above all thresholds
+  }
+  
+  // Get detail noise parameters appropriate for each elevation zone
+  getDetailParamsForElevation(zoneName, baseParams) {
+    // Create a copy of the base parameters
+    const params = {...baseParams};
+    
+    switch (zoneName) {
+      case "water":
+        // Very subtle, smooth variation for water
+        params.detailScale = 0.02;
+        params.persistence = 0.3;
+        params.lacunarity = 1.8;
+        params.octaves = 2;
+        params.exponent = 1.0;
+        break;
+        
+      case "lowlands":
+        // Gentle rolling hills, more rounded
+        params.detailScale = 0.1;
+        params.persistence = 0.4;
+        params.lacunarity = 1.9;
+        params.octaves = 3;
+        params.exponent = 1.5;
+        break;
+        
+      case "foothills":
+        // More varied terrain, medium detail
+        params.detailScale = 0.15;
+        params.persistence = 0.5;
+        params.lacunarity = 2.0;
+        params.octaves = 4;
+        params.exponent = 1.8;
+        break;
+        
+      case "mountains":
+        // Rugged terrain with sharper features
+        params.detailScale = 0.2;
+        params.persistence = 0.55;
+        params.lacunarity = 2.2;
+        params.octaves = 4;
+        params.exponent = 2.0;
+        break;
+        
+      case "peaks":
+        // Jagged peaks with dramatic details
+        params.detailScale = 0.25;
+        params.persistence = 0.6;
+        params.lacunarity = 2.5;
+        params.octaves = 3; // Less octaves for more dramatic shapes
+        params.exponent = 2.3;
+        break;
+        
+      default:
+        // Default parameters
+        params.detailScale = 0.2;
+    }
+    
+    return params;
   }
   
   // Apply post-processing to heightmap for smoother terrain and consistent water
@@ -519,7 +711,8 @@ export class HierarchicalTerrainManager {
     return heightMap;
   }
   
-  // Create a mesh for a chunk
+  // Create a mesh for a chunk with enhanced coloring for elevation zones
+  // Create a mesh for a chunk with enhanced coloring for elevation zones
   createChunkMesh(heightMap, worldX, worldZ) {
     // Create geometry
     const geometry = new THREE.PlaneGeometry(
@@ -584,10 +777,10 @@ export class HierarchicalTerrainManager {
         
         return heightMap[clampedGridZ * this.microResolution + clampedGridX];
       }
-    };
+    }
   }
-  
-  // Apply colors to terrain based on height and slope
+
+  // Apply colors to terrain based on height, slope, and elevation zones
   applyTerrainColors(geometry, heightMap) {
     const colors = new Float32Array(geometry.attributes.position.count * 3);
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -595,8 +788,8 @@ export class HierarchicalTerrainManager {
     // Find height range
     let minHeight = Infinity, maxHeight = -Infinity;
     for (let i = 0; i < heightMap.length; i++) {
-      minHeight = Math.min(minHeight, heightMap[i]);
-      maxHeight = Math.max(maxHeight, heightMap[i]);
+        minHeight = Math.min(minHeight, heightMap[i]);
+        maxHeight = Math.max(maxHeight, heightMap[i]);
     }
     
     const heightRange = maxHeight - minHeight > 0 ? maxHeight - minHeight : 1;
@@ -606,7 +799,7 @@ export class HierarchicalTerrainManager {
     const resolution = this.microResolution;
     
     for (let z = 0; z < resolution; z++) {
-      for (let x = 0; x < resolution; x++) {
+        for (let x = 0; x < resolution; x++) {
         const idx = z * resolution + x;
         const h = heightMap[idx];
         
@@ -616,272 +809,172 @@ export class HierarchicalTerrainManager {
         
         // Check x neighbors
         if (x > 0) {
-          dhdx += h - heightMap[z * resolution + (x - 1)];
-          neighbors++;
+            dhdx += h - heightMap[z * resolution + (x - 1)];
+            neighbors++;
         }
         if (x < resolution - 1) {
-          dhdx += heightMap[z * resolution + (x + 1)] - h;
-          neighbors++;
+            dhdx += heightMap[z * resolution + (x + 1)] - h;
+            neighbors++;
         }
         
         // Check z neighbors
         if (z > 0) {
-          dhdz += h - heightMap[(z - 1) * resolution + x];
-          neighbors++;
+            dhdz += h - heightMap[(z - 1) * resolution + x];
+            neighbors++;
         }
         if (z < resolution - 1) {
-          dhdz += heightMap[(z + 1) * resolution + x] - h;
-          neighbors++;
+            dhdz += heightMap[(z + 1) * resolution + x] - h;
+            neighbors++;
         }
         
         // Average the gradients
         if (neighbors > 0) {
-          dhdx /= neighbors * 0.5; // Scale factor for heightmap resolution
-          dhdz /= neighbors * 0.5;
+            dhdx /= neighbors * 0.5; // Scale factor for heightmap resolution
+            dhdz /= neighbors * 0.5;
         }
         
         // Calculate slope magnitude
         const slope = Math.sqrt(dhdx * dhdx + dhdz * dhdz);
         slopes[idx] = slope;
-      }
+        }
     }
     
-    // Set colors based on height and slope
+    // Set colors based on height zones, slope, and custom elevation zone properties
     for (let i = 0; i < geometry.attributes.position.count; i++) {
-      const height = heightMap[i];
-      const normalizedHeight = (height - minHeight) / heightRange;
-      const slope = slopes[i] / this.heightScale * 10; // Normalize slope
-      
-      let color = new THREE.Color();
-      
-      if (height <= this.waterLevel + 0.1) {
-        // Water
-        color.setRGB(0.2, 0.4, 0.8);
-      } 
-      else if (normalizedHeight < 0.2) {
-        // Beach/sand
-        color.setRGB(0.76, 0.7, 0.5);
-      }
-      else if (normalizedHeight < 0.5) {
-        // Lowlands - grass and dirt mix based on slope
-        const grassColor = new THREE.Color(0.3, 0.7, 0.3);
+        const height = heightMap[i];
+        const normalizedHeight = (height - minHeight) / heightRange;
+        const slope = slopes[i] / this.heightScale * 10; // Normalize slope
+        
+        let color = new THREE.Color();
+        
+        // First determine the elevation zone
+        const zoneName = this.getElevationZone(normalizedHeight);
+        
+        if (height <= this.waterLevel + 0.1) {
+        // Water - deeper blue in deeper areas, lighter in shallow areas
+        const depthFactor = Math.max(0, Math.min(1, (this.waterLevel - height) * 2));
+        const deepWater = new THREE.Color(0.0, 0.2, 0.5);  // Deep water
+        const shallowWater = new THREE.Color(0.2, 0.5, 0.9); // Shallow water
+        color.copy(shallowWater).lerp(deepWater, depthFactor);
+        } 
+        else if (zoneName === "lowlands" && normalizedHeight < 0.25) {
+        // Beach/sand transition - closer to water is more sandy
+        const sandColor = new THREE.Color(0.76, 0.7, 0.5);
+        const grassColor = new THREE.Color(0.4, 0.7, 0.3);
+        
+        // Mix sand and grass based on height
+        const sandFactor = 1.0 - (normalizedHeight - 0.15) / 0.1;
+        color.copy(grassColor).lerp(sandColor, Math.max(0, Math.min(1, sandFactor)));
+        }
+        else if (zoneName === "lowlands") {
+        // Lowlands - green with variation based on noise and slope
+        const baseGreenColor = new THREE.Color(0.3, 0.65, 0.3);
         const dirtColor = new THREE.Color(0.5, 0.4, 0.3);
+        const darkerGreenColor = new THREE.Color(0.2, 0.5, 0.2);
+        
+        // Create variety in the grass color using a noise function
+        // Simplified noise variation through subtle mixing
+        const noiseFactor = (Math.sin(i * 0.1) + Math.cos(i * 0.17)) * 0.25 + 0.5;
+        const grassColor = new THREE.Color().copy(baseGreenColor)
+                            .lerp(darkerGreenColor, noiseFactor * 0.5);
         
         // More dirt on slopes
+        const slopeFactor = Math.min(1, slope * 2.5);
+        color.copy(grassColor).lerp(dirtColor, slopeFactor * 0.7);
+        }
+        else if (zoneName === "foothills") {
+        // Foothills - transition from grass to rocky
+        const grassColor = new THREE.Color(0.3, 0.55, 0.25);
+        const rockColor = new THREE.Color(0.5, 0.45, 0.35);
+        
+        // Mix based on normalized height within the foothills zone
+        const t = (normalizedHeight - 0.35) / 0.25;
+        const baseMix = Math.max(0, Math.min(1, t));
+        
+        // Add slope factor - more rocky on steeper slopes
         const slopeFactor = Math.min(1, slope * 2);
-        color.copy(grassColor).lerp(dirtColor, slopeFactor);
-      }
-      else if (normalizedHeight < 0.7) {
-        // Mid elevations - transition to rocky
-        const midColor = new THREE.Color(0.4, 0.4, 0.3);
-        const rockColor = new THREE.Color(0.5, 0.5, 0.5);
+        const finalMix = Math.min(1, baseMix + slopeFactor * 0.3);
         
-        const t = (normalizedHeight - 0.5) / 0.2;
-        color.copy(midColor).lerp(rockColor, t);
-      }
-      else if (normalizedHeight < 0.9) {
-        // Mountain - rock
-        color.setRGB(0.6, 0.6, 0.6);
-      }
-      else {
-        // Mountain peaks - snow, with less snow on steep slopes
-        const rockColor = new THREE.Color(0.6, 0.6, 0.6);
-        const snowColor = new THREE.Color(0.9, 0.9, 0.95);
+        color.copy(grassColor).lerp(rockColor, finalMix);
+        }
+        else if (zoneName === "mountains") {
+        // Mountains - rocky with some vegetation in lower parts
+        const rockColor = new THREE.Color(0.55, 0.52, 0.5);
+        const darkRockColor = new THREE.Color(0.4, 0.38, 0.36);
+        const alpineColor = new THREE.Color(0.45, 0.5, 0.4);
         
-        // Less snow on steep slopes
-        const slopeFactor = Math.min(1, slope * 4);
-        color.copy(snowColor).lerp(rockColor, slopeFactor);
-      }
-      
-      const colorIndex = i * 3;
-      colors[colorIndex] = color.r;
-      colors[colorIndex + 1] = color.g;
-      colors[colorIndex + 2] = color.b;
+        // Mix different rock colors based on noise pattern
+        const noiseMix = (Math.sin(i * 0.3) + Math.cos(i * 0.23)) * 0.25 + 0.5;
+        const baseRockColor = new THREE.Color().copy(rockColor)
+                                .lerp(darkRockColor, noiseMix);
+        
+        // Add some green/alpine variation in lower parts of mountain zone
+        const t = (normalizedHeight - 0.6) / 0.2;
+        let alpineMix = Math.max(0, 1.0 - Math.min(1, t * 2));
+        
+        // Reduce alpine color on very steep slopes
+        alpineMix *= (1.0 - Math.min(1, slope * 1.5));
+        
+        color.copy(baseRockColor).lerp(alpineColor, alpineMix * 0.5);
+        }
+        else if (zoneName === "peaks") {
+        // Mountain peaks - transition to snow
+        const rockColor = new THREE.Color(0.6, 0.58, 0.56);
+        const snowColor = new THREE.Color(0.95, 0.95, 0.97);
+        
+        // Calculate snow cover based on height
+        const snowLine = 0.8;
+        const snowTransitionWidth = 0.2;
+        const t = (normalizedHeight - snowLine) / snowTransitionWidth;
+        let snowCover = Math.max(0, Math.min(1, t));
+        
+        // Adjust snow cover based on slope - less snow on steeper slopes
+        const maxSnowSlope = 0.8; // Max slope that can hold full snow
+        const slopeEffect = Math.max(0, Math.min(1, (slope - maxSnowSlope) / (1 - maxSnowSlope)));
+        snowCover *= (1.0 - slopeEffect * 0.8);
+        
+        // Add noise variation to snow cover for more natural look
+        const noiseVariation = (Math.sin(i * 0.41) + Math.cos(i * 0.27)) * 0.15;
+        snowCover = Math.max(0, Math.min(1, snowCover + noiseVariation));
+        
+        color.copy(rockColor).lerp(snowColor, snowCover);
+        }
+        
+        // Apply color to vertex
+        const colorIndex = i * 3;
+        colors[colorIndex] = color.r;
+        colors[colorIndex + 1] = color.g;
+        colors[colorIndex + 2] = color.b;
+    }
+  }
+
+  // Add this method to the HierarchicalTerrainManager class
+getHeightAt(worldX, worldZ) {
+  // Try to get height from the correct chunk
+  const chunkX = Math.floor(worldX / this.microSize);
+  const chunkZ = Math.floor(worldZ / this.microSize);
+  const key = `${chunkX},${chunkZ}`;
+  
+  const chunk = this.microChunks.get(key);
+  if (chunk) {
+    const height = chunk.getHeightAt(worldX, worldZ);
+    if (height !== null) {
+      return height;
     }
   }
   
-  // Get terrain height at any world position
-  getHeightAt(worldX, worldZ) {
-    // Try to get height from the correct chunk
-    const chunkX = Math.floor(worldX / this.microSize);
-    const chunkZ = Math.floor(worldZ / this.microSize);
-    const key = `${chunkX},${chunkZ}`;
-    
-    const chunk = this.microChunks.get(key);
-    if (chunk) {
-      const height = chunk.getHeightAt(worldX, worldZ);
-      if (height !== null) {
-        return height;
-      }
-    }
-    
-    // If chunk isn't loaded, check if we're in nearby loaded chunks
-    // This helps with boundary conditions
-    for (const [, chunk] of this.microChunks) {
-      const height = chunk.getHeightAt(worldX, worldZ);
-      if (height !== null) {
-        return height;
-      }
-    }
-    
-    // If no chunk is loaded or point is outside all chunks,
-    // fall back to macro terrain
-    return this.getInterpolatedMacroHeight(worldX, worldZ);
-  }
-  
-  // Update chunks based on player position
-  updatePlayerPosition(worldX, worldZ) {
-    const chunkX = Math.floor(worldX / this.microSize);
-    const chunkZ = Math.floor(worldZ / this.microSize);
-    
-    // Check if player moved to a new chunk
-    if (chunkX !== this.currentChunk.x || chunkZ !== this.currentChunk.z) {
-      this.currentChunk = { x: chunkX, z: chunkZ };
-      this.generateChunksAroundPosition(chunkX, chunkZ);
+  // If chunk isn't loaded, check if we're in nearby loaded chunks
+  // This helps with boundary conditions
+  for (const [, chunk] of this.microChunks) {
+    const height = chunk.getHeightAt(worldX, worldZ);
+    if (height !== null) {
+      return height;
     }
   }
   
-  // Unload a chunk by key
-  unloadChunk(key) {
-    const chunk = this.microChunks.get(key);
-    if (!chunk) return;
-    
-    // Remove from scene
-    this.chunksContainer.remove(chunk.mesh);
-    
-    // Dispose of geometry and materials
-    if (chunk.mesh.geometry) chunk.mesh.geometry.dispose();
-    if (chunk.mesh.material) {
-      if (Array.isArray(chunk.mesh.material)) {
-        chunk.mesh.material.forEach(m => m.dispose());
-      } else {
-        chunk.mesh.material.dispose();
-      }
-    }
-    
-    // Clean up debug markers
-    if (this.debugMode) {
-      const markerKey = key;
-      if (this.debugMarkers[markerKey]) {
-        this.scene.remove(this.debugMarkers[markerKey]);
-        delete this.debugMarkers[markerKey];
-      }
-      if (this.debugMarkers[markerKey + '_label']) {
-        this.scene.remove(this.debugMarkers[markerKey + '_label']);
-        delete this.debugMarkers[markerKey + '_label'];
-      }
-    }
-    
-    // Remove from map
-    this.microChunks.delete(key);
-  }
-  
-  // Change the active terrain profile
-  async changeProfile(profileName) {
-    this.activeProfile = profileName;
-    
-    // Generate a new seed for this profile
-    this.seed = Math.random() * 10000;
-    
-    // Clear all existing chunks
-    for (const key of this.microChunks.keys()) {
-      this.unloadChunk(key);
-    }
-    
-    // Regenerate macro terrain
-    await this.generateMacroTerrain();
-    
-    // Regenerate visible chunks
-    await this.generateChunksAroundPosition(this.currentChunk.x, this.currentChunk.z);
-  }
-  
-  // Set view distance
-  setViewDistance(distance) {
-    this.viewDistance = Math.max(1, Math.min(8, distance));
-    this.generateChunksAroundPosition(this.currentChunk.x, this.currentChunk.z);
-  }
-  
-  // Debug visualization of chunks
-  addDebugMarker(chunkX, chunkZ) {
-    const key = `${chunkX},${chunkZ}`;
-    
-    if (this.debugMarkers[key]) return;
-    
-    const worldX = chunkX * this.microSize;
-    const worldZ = chunkZ * this.microSize;
-    
-    // Create marker cube
-    const geometry = new THREE.BoxGeometry(2, 20, 2);
-    const material = new THREE.MeshBasicMaterial({ 
-      color: 0xff0000, 
-      wireframe: true 
-    });
-    
-    const marker = new THREE.Mesh(geometry, material);
-    marker.position.set(worldX, 5, worldZ);
-    
-    this.scene.add(marker);
-    this.debugMarkers[key] = marker;
-    
-    // Create label
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 128;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = 'white';
-    ctx.font = '24px Arial';
-    ctx.fillText(`Chunk ${chunkX},${chunkZ}`, 10, 64);
-    
-    const texture = new THREE.CanvasTexture(canvas);
-    const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
-    const sprite = new THREE.Sprite(spriteMaterial);
-    sprite.position.set(worldX, 30, worldZ);
-    sprite.scale.set(30, 15, 1);
-    
-    this.scene.add(sprite);
-    this.debugMarkers[key + '_label'] = sprite;
-  }
-  
-  // Toggle chunk debug visualization
-  toggleDebug() {
-    this.debugMode = !this.debugMode;
-    
-    if (this.debugMode) {
-      // Add debug markers for all chunks
-      for (const [key] of this.microChunks) {
-        const [x, z] = key.split(',').map(Number);
-        this.addDebugMarker(x, z);
-      }
-    } else {
-      // Remove all debug markers
-      for (const key in this.debugMarkers) {
-        this.scene.remove(this.debugMarkers[key]);
-      }
-      this.debugMarkers = {};
-    }
-    
-    return this.debugMode;
-  }
-  
-  // Get all loaded chunks
-  getLoadedChunks() {
-    return Array.from(this.microChunks.values());
-  }
-  
-  // Check if a point is on a ridge (used for waypoints)
-  isRidge(worldX, worldZ, threshold = 5) {
-    // Sample heights in a small cross pattern
-    const sample = 5;
-    const center = this.getHeightAt(worldX, worldZ);
-    const north = this.getHeightAt(worldX, worldZ - sample);
-    const south = this.getHeightAt(worldX, worldZ + sample);
-    const east = this.getHeightAt(worldX + sample, worldZ);
-    const west = this.getHeightAt(worldX - sample, worldZ);
-    
-    // Ridge detection - higher than neighbors in at least one direction
-    const isEWRidge = (center > east && center > west);
-    const isNSRidge = (center > north && center > south);
-    
-    return isEWRidge || isNSRidge;
-  }
+  // If no chunk is loaded or point is outside all chunks,
+  // fall back to macro terrain
+  return this.getInterpolatedMacroHeight(worldX, worldZ);
+}
+
 }

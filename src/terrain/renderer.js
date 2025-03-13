@@ -6,7 +6,7 @@ export class TerrainRenderer {
     this.terrain = terrain;
     this.textures = {};
     
-    // Initialize directly instead of async
+    // Initialize textures
     this.loadTextures();
     
     // Create terrain mesh immediately
@@ -16,14 +16,16 @@ export class TerrainRenderer {
   }
   
   loadTextures() {
-    // Simplified synchronous texture setup for debugging
     console.log("Setting up terrain textures");
     
-    // Just use colors for now
+    // Define colors for different terrain types
     this.textures = {
-      grass: new THREE.Color(0x3b7d4e),
-      rock: new THREE.Color(0x808080),
-      snow: new THREE.Color(0xffffff)
+      grass: new THREE.Color(0x3b7d4e),     // Darker green for low areas
+      dirt: new THREE.Color(0x8B4513),      // Brown for slopes
+      rock: new THREE.Color(0x808080),      // Gray for steep areas
+      snow: new THREE.Color(0xFFFFFF),      // White for peaks
+      sand: new THREE.Color(0xE0C79A),      // Sand for beach areas
+      water: new THREE.Color(0x4682B4)      // Water areas (if needed)
     };
   }
   
@@ -44,11 +46,13 @@ export class TerrainRenderer {
     // Create vertex colors based on height and slope
     this.applyTerrainColors(geometry, heightMap, width, depth);
     
-    // Create material - first try with a basic material for maximum visibility
-    const material = new THREE.MeshBasicMaterial({
+    // Create material with vertex colors and improved appearance
+    const material = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      wireframe: true,  // Add wireframe for debugging
-      side: THREE.DoubleSide // Make sure it's visible from both sides
+      roughness: 0.8,
+      metalness: 0.1,
+      flatShading: false, // Set to true for a more polygonal look
+      side: THREE.FrontSide
     });
     
     // Create mesh
@@ -84,13 +88,34 @@ export class TerrainRenderer {
     
     const positions = geometry.attributes.position.array;
     
+    // Find min and max heights for proper scaling
+    let minHeight = Infinity;
+    let maxHeight = -Infinity;
+    for (let i = 0; i < heightMap.length; i++) {
+      minHeight = Math.min(minHeight, heightMap[i]);
+      maxHeight = Math.max(maxHeight, heightMap[i]);
+    }
+    
+    const heightRange = maxHeight - minHeight;
+    
+    // Terrain type thresholds (normalized 0-1)
+    const waterLevel = 0.08;
+    const sandLevel = 0.12;
+    const grassLevel = 0.45;
+    const rockLevel = 0.75;
+    
+    // Slope thresholds
+    const lowSlopeThreshold = 0.2;
+    const highSlopeThreshold = 0.5;
+    
     // Set colors based on height and slope
     for (let i = 0; i < positions.length / 3; i++) {
       const x = i % width;
       const z = Math.floor(i / width);
       
-      // Get vertex height
+      // Get vertex height and normalize to 0-1
       const height = heightMap[i];
+      const normalizedHeight = (height - minHeight) / heightRange;
       
       // Calculate gradient (steepness)
       const gradient = calculateGradient(heightMap, width, x, z);
@@ -98,14 +123,26 @@ export class TerrainRenderer {
       // Determine color based on height and gradient
       let color = new THREE.Color();
       
-      if (gradient > 0.5) {
-        // Steep areas (rock)
+      if (normalizedHeight < waterLevel) {
+        // Water
+        color.copy(this.textures.water);
+      } else if (normalizedHeight < sandLevel) {
+        // Sand/Beach
+        color.copy(this.textures.sand);
+      } else if (gradient > highSlopeThreshold) {
+        // Very steep areas (rock)
         color.copy(this.textures.rock);
-      } else if (height > 25) {
-        // High areas (snow)
-        color.copy(this.textures.snow);
+      } else if (normalizedHeight > rockLevel) {
+        // Mountain peaks (potential snow)
+        // Mix rock and snow based on height
+        const snowMix = (normalizedHeight - rockLevel) / (1 - rockLevel);
+        color.copy(this.textures.rock).lerp(this.textures.snow, snowMix);
+      } else if (gradient > lowSlopeThreshold) {
+        // Moderate slopes (mix of dirt and grass)
+        const dirtMix = (gradient - lowSlopeThreshold) / (highSlopeThreshold - lowSlopeThreshold);
+        color.copy(this.textures.grass).lerp(this.textures.dirt, dirtMix);
       } else {
-        // Normal terrain (grass)
+        // Lower, flatter areas (grass)
         color.copy(this.textures.grass);
       }
       

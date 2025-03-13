@@ -5,81 +5,89 @@ export function createScene() {
   
   // Create scene
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x87ceeb); // Sky blue
   
-  // Add fog for distance fade (reduced density for better visibility)
-  scene.fog = new THREE.FogExp2(0x87ceeb, 0.005);
+  // Set background to a blue sky color
+  scene.background = new THREE.Color(0x87CEEB);
+  
+  // Add softer fog for distance fade (reduced density for better visibility)
+  scene.fog = new THREE.FogExp2(0x87CEEB, 0.002);
   
   // Create camera
   const camera = new THREE.PerspectiveCamera(
     75, 
     window.innerWidth / window.innerHeight, 
     0.1, 
-    1000
+    2000 // Increased far plane for larger terrain
   );
   
-  // Position camera higher and farther back for better initial view
-  camera.position.set(0, 30, 50); 
-  camera.lookAt(0, 0, 0); // Look at the center of the scene
+  // Initial camera position (will be overridden by player position)
+  camera.position.set(0, 50, 50);
+  camera.lookAt(0, 0, 0);
   
-  // Create renderer
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  // Create renderer with enhanced settings
+  const renderer = new THREE.WebGLRenderer({ 
+    antialias: true,
+    alpha: true,
+    powerPreference: 'high-performance'
+  });
+  
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio for performance
+  
+  // Enable shadows with better quality
   renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  
+  // Set tone mapping for better lighting
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.2;
+  
   document.body.appendChild(renderer.domElement);
   
   // Add lighting
   addLighting(scene);
   
-  // Add a helper grid for visualization during development
-  const gridHelper = new THREE.GridHelper(200, 50);
+  // Add a helper grid for development (can be removed in production)
+  const gridSize = 512;
+  const gridDivisions = 32;
+  const gridHelper = new THREE.GridHelper(gridSize, gridDivisions, 0x888888, 0x444444);
+  gridHelper.position.y = 0.1; // Raise slightly to avoid z-fighting
+  gridHelper.visible = false; // Hidden by default, can be toggled for debugging
   scene.add(gridHelper);
-  
-  // Add axes helper
-  const axesHelper = new THREE.AxesHelper(20);
-  scene.add(axesHelper);
-  
-  // Add a debug sphere at origin to check visibility
-  const debugSphere = new THREE.Mesh(
-    new THREE.SphereGeometry(5, 16, 16),
-    new THREE.MeshBasicMaterial({ color: 0xff0000 })
-  );
-  debugSphere.position.set(0, 20, 0);
-  scene.add(debugSphere);
-  
-  // Log camera position and scene contents
-  console.log("Camera position:", camera.position);
-  console.log("Scene children:", scene.children.length);
   
   return { scene, camera, renderer };
 }
 
 function addLighting(scene) {
-  // Ambient light (increased brightness for better visibility)
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+  // Ambient light - provides base illumination
+  const ambientLight = new THREE.AmbientLight(0xCCDDFF, 0.4);
   scene.add(ambientLight);
   
   // Directional light (sun)
-  const sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
-  sunLight.position.set(50, 100, 50);
+  const sunLight = new THREE.DirectionalLight(0xFFFFDD, 1.0);
+  sunLight.position.set(100, 150, 50);
   sunLight.castShadow = true;
   
-  // Add a helper to visualize light direction
-  const lightHelper = new THREE.DirectionalLightHelper(sunLight, 10);
-  scene.add(lightHelper);
-  
-  // Set up shadow properties
+  // Improve shadow quality
   sunLight.shadow.mapSize.width = 2048;
   sunLight.shadow.mapSize.height = 2048;
   sunLight.shadow.camera.near = 0.5;
   sunLight.shadow.camera.far = 500;
-  sunLight.shadow.camera.left = -100;
-  sunLight.shadow.camera.right = 100;
-  sunLight.shadow.camera.top = 100;
-  sunLight.shadow.camera.bottom = -100;
+  sunLight.shadow.camera.left = -250;
+  sunLight.shadow.camera.right = 250;
+  sunLight.shadow.camera.top = 250;
+  sunLight.shadow.camera.bottom = -250;
+  sunLight.shadow.bias = -0.0005;
   
   scene.add(sunLight);
+  
+  // Hemisphere light - adds sky and ground color influence
+  const hemisphereLight = new THREE.HemisphereLight(
+    0x87CEEB, // Sky color
+    0x3A5F0B, // Ground color
+    0.6        // Intensity
+  );
+  scene.add(hemisphereLight);
 }
 
 export function resizeHandler(camera, renderer) {

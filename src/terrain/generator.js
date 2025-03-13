@@ -9,8 +9,8 @@ export async function generateTerrain(width, depth, height) {
   const geometry = new THREE.PlaneGeometry(width, depth, width - 1, depth - 1);
   geometry.rotateX(-Math.PI / 2); // Rotate to be horizontal
   
-  // Create heightmap
-  const heightMap = createHeightMap(width, depth, noise2D, height);
+  // Create heightmap using fractal Brownian motion
+  const heightMap = createHeightMapFBM(width, depth, noise2D, height);
   
   // Apply heightmap to geometry
   applyHeightMap(geometry, heightMap, width, depth);
@@ -67,41 +67,64 @@ export async function generateTerrain(width, depth, height) {
   return terrain;
 }
 
-function createHeightMap(width, depth, noise2D, heightScale) {
+// Fractal Brownian Motion implementation for more natural terrain
+function createHeightMapFBM(width, depth, noise2D, heightScale) {
   const heightMap = new Float32Array(width * depth);
   
-  // Multiple layers of noise with different frequencies and amplitudes
-  const octaves = 6;
-  const persistence = 0.5;
-  const lacunarity = 2.0;
+  // fBm parameters
+  const octaves = 8;          // Number of layers of noise
+  const persistence = 0.55;   // How much influence each octave has (amplitude factor)
+  const lacunarity = 2.0;     // How much detail is added at each octave (frequency factor)
+  const initialFrequency = 2; // Initial scale of the noise
+  const ridge = 0.9;          // Ridge factor for creating sharper mountain peaks
   
-  // Fill height map with noise values
+  // Seed position offset (can be randomized)
+  const offsetX = Math.random() * 100;
+  const offsetZ = Math.random() * 100;
+  
+  // Fill height map with fBm noise values
   for (let z = 0; z < depth; z++) {
     for (let x = 0; x < width; x++) {
       // Calculate noise coordinates
-      const nx = x / width - 0.5;
-      const nz = z / depth - 0.5;
+      const nx = x / width;
+      const nz = z / depth;
       
       let amplitude = 1.0;
-      let frequency = 1.0;
+      let frequency = initialFrequency;
       let noiseHeight = 0;
+      let normalization = 0;
       
       // Sum multiple octaves of noise
       for (let o = 0; o < octaves; o++) {
-        const sampleX = nx * frequency;
-        const sampleZ = nz * frequency;
+        // Sample noise at current frequency
+        const sampleX = (nx * frequency) + offsetX;
+        const sampleZ = (nz * frequency) + offsetZ;
         
-        // Get noise value
-        const noiseValue = noise2D(sampleX, sampleZ) * 0.5 + 0.5; // Map from [-1,1] to [0,1]
+        // Get noise value (-1 to 1)
+        let noiseValue = noise2D(sampleX, sampleZ);
+        
+        // Ridge noise transformation (for sharper mountain peaks)
+        noiseValue = Math.abs(noiseValue);
+        noiseValue = ridge - noiseValue;
+        noiseValue = noiseValue * noiseValue;
+        
+        // Add to height with current amplitude
         noiseHeight += noiseValue * amplitude;
+        normalization += amplitude;
         
         // Update frequency and amplitude for next octave
         amplitude *= persistence;
         frequency *= lacunarity;
       }
       
-      // Normalize and apply height scale
-      noiseHeight = Math.pow(noiseHeight / 2, 2.5) * heightScale;
+      // Normalize to 0-1 range
+      noiseHeight /= normalization;
+      
+      // Apply nonlinear transformations for more interesting terrain
+      noiseHeight = Math.pow(noiseHeight, 2.5); // Exponent makes flatter valleys, steeper mountains
+      
+      // Apply final height scale
+      noiseHeight *= heightScale;
       
       // Store in heightmap
       heightMap[z * width + x] = noiseHeight;
@@ -132,7 +155,7 @@ function createTerrainMaterial() {
     flatShading: false,    // Smooth shading
     metalness: 0.0,
     roughness: 0.8,
-    vertexColors: false    // We'll set colors in a custom shader if needed
+    vertexColors: false    // We'll set colors in renderer.js
   });
 }
 

@@ -23,72 +23,31 @@ async function init() {
   // Add window resize handler
   window.addEventListener('resize', () => resizeHandler(camera, renderer));
   
-  // Generate terrain (simplified version for first run)
-  console.log("Generating terrain...");
-  const terrainWidth = 256;
-  const terrainDepth = 256;
-  const terrainHeight = 40;
+  // Generate procedural terrain using fBm
+  console.log("Generating terrain using fBm...");
+  const terrainWidth = 512; // Increased for larger terrain
+  const terrainDepth = 512;
+  const terrainHeight = 80; // Increased for more dramatic mountains
   
-  // Create a more visible heightmap for testing
-  const heightMap = new Float32Array(terrainWidth * terrainDepth);
-  for (let z = 0; z < terrainDepth; z++) {
-    for (let x = 0; x < terrainWidth; x++) {
-      // Exaggerated mountain pattern for better visibility
-      const nx = x / terrainWidth * 4;
-      const nz = z / terrainDepth * 4;
-      heightMap[z * terrainWidth + x] = Math.sin(nx * Math.PI) * Math.cos(nz * Math.PI) * 30 + 10;
-    }
-  }
+  const terrain = await generateTerrain(terrainWidth, terrainDepth, terrainHeight);
+  scene.add(terrain.mesh);
   
-  // Create terrain object
-  const terrain = {
-    width: terrainWidth,
-    depth: terrainDepth,
-    heightMap: heightMap,
-    
-    // Method to get height at any point
-    getHeightAt(x, z) {
-      try {
-        // Convert world coordinates to heightmap indices
-        const ix = Math.floor((x + this.width / 2) / this.width * (this.width - 1));
-        const iz = Math.floor((z + this.depth / 2) / this.depth * (this.depth - 1));
-        
-        // Clamp to valid indices
-        const clampedIx = Math.max(0, Math.min(this.width - 1, ix));
-        const clampedIz = Math.max(0, Math.min(this.depth - 1, iz));
-        
-        // Return height from heightmap
-        return this.heightMap[clampedIz * this.width + clampedIx];
-      } catch (e) {
-        console.error("Error in getHeightAt:", e);
-        return 0; // Return 0 as a fallback
-      }
-    }
-  };
-  
-  // Create terrain renderer and add mesh to scene
-  const terrainRenderer = new TerrainRenderer(terrain);
-  if (terrainRenderer.mesh) {
-    console.log("Adding terrain mesh to scene");
-    scene.add(terrainRenderer.mesh);
-  } else {
-    console.error("Terrain mesh is null - waiting for initialization");
-    // Try again after a short delay
-    setTimeout(() => {
-      if (terrainRenderer.mesh) {
-        console.log("Adding delayed terrain mesh to scene");
-        scene.add(terrainRenderer.mesh);
-      }
-    }, 1000);
-  }
-  
-  // Initialize player controls (simplified for debugging)
+  // Initialize player controls - start at a good viewpoint
   console.log("Initializing player...");
   const player = initPlayer(camera, terrain);
   player.camera = camera; // Add camera reference for updates
   
-  // Skip waypoints for initial debugging
-  console.log("Skipping waypoints for initial debug");
+  // Start at an elevated position for a better view
+  const startX = 0;
+  const startZ = -50; // Start back from the center
+  const heightAtStart = terrain.getHeightAt(startX, startZ) + player.height + 2;
+  player.position.set(startX, heightAtStart, startZ);
+  camera.position.copy(player.position);
+  
+  // Create waypoint system for ridge navigation
+  console.log("Creating waypoints along ridges...");
+  const waypointSystem = new WaypointSystem(scene, terrain);
+  const waypoints = waypointSystem.generateWaypoints(8); // Generate 8 waypoints
   
   // Animation loop
   function animate(currentTime) {
@@ -108,6 +67,9 @@ async function init() {
     
     // Update player position and camera
     updatePlayer(player, deltaTime, terrain);
+    
+    // Update waypoint system
+    waypointSystem.update(player.position);
     
     // Update position display
     if (positionDisplay) {

@@ -117,19 +117,19 @@ function fixTerrainColors() {
       const colorIndex = i * 3;
       
       // Simple coloring logic
-      if (normalizedHeight < 0.1) {
+      if (normalizedHeight < 0.05) {
         // Water - blue
         colors[colorIndex] = 0.0;      // R
         colors[colorIndex + 1] = 0.2;  // G
         colors[colorIndex + 2] = 0.8;  // B
       } 
-      else if (normalizedHeight < 0.3) {
+      else if (normalizedHeight < 0.17) {
         // Low land - green
         colors[colorIndex] = 0.0;      // R
         colors[colorIndex + 1] = 0.7;  // G
         colors[colorIndex + 2] = 0.2;  // B
       }
-      else if (normalizedHeight < 0.7) {
+      else if (normalizedHeight < 0.25) {
         // Mountains - brown to gray
         const t = (normalizedHeight - 0.3) / 0.4; // 0-1 in this range
         colors[colorIndex] = 0.4 + t * 0.3;       // R

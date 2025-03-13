@@ -1,5 +1,12 @@
+// src/core/Scene.js
+// Handles scene creation and management
+
 import * as THREE from 'three';
 
+/**
+ * Create a new scene with camera, renderer, lighting, and environment
+ * @returns {Object} - Object containing the scene, camera, and renderer
+ */
 export function createScene() {
   // Create scene with blue sky and fog
   const scene = new THREE.Scene();
@@ -42,6 +49,10 @@ export function createScene() {
   return { scene, camera, renderer };
 }
 
+/**
+ * Add lighting to the scene
+ * @param {THREE.Scene} scene - The scene to add lighting to
+ */
 function addLighting(scene) {
   // Ambient light
   const ambientLight = new THREE.AmbientLight(0xCCDDFF, 0.6);
@@ -77,7 +88,10 @@ function addLighting(scene) {
   scene.add(hemisphereLight);
 }
 
-// Add a simple sky with cloud-like elements
+/**
+ * Add a sky with clouds and distant mountains
+ * @param {THREE.Scene} scene - The scene to add the sky to
+ */
 function addSky(scene) {
   // Create sky dome
   const skyGeometry = new THREE.SphereGeometry(4000, 32, 32);
@@ -127,7 +141,10 @@ function addSky(scene) {
   addDistantMountains(scene);
 }
 
-// Add distant mountains on the horizon
+/**
+ * Add distant mountains on the horizon
+ * @param {THREE.Scene} scene - The scene to add the mountains to
+ */
 function addDistantMountains(scene) {
   const mountainGeometry = new THREE.PlaneGeometry(8000, 400, 100, 20);
   
@@ -172,6 +189,11 @@ function addDistantMountains(scene) {
   scene.add(mountains);
 }
 
+/**
+ * Handler for window resize events
+ * @param {THREE.Camera} camera - The camera to update
+ * @param {THREE.WebGLRenderer} renderer - The renderer to resize
+ */
 export function resizeHandler(camera, renderer) {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();

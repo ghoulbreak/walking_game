@@ -13,6 +13,16 @@ export class TerrainRenderer {
     this.mesh = this.createMesh();
     
     console.log("TerrainRenderer constructor complete, mesh created:", !!this.mesh);
+
+    // Enhance the directional light for more dramatic shadows
+    const sunLight = new THREE.DirectionalLight(0xFFFFDD, 1.2); // Increased intensity
+    sunLight.position.set(150, 200, 80); // Higher angle for longer shadows
+    sunLight.castShadow = true;
+
+    // Improve shadow quality
+    sunLight.shadow.mapSize.width = 4096;  // Increased from 2048
+    sunLight.shadow.mapSize.height = 4096; // Increased from 2048
+    sunLight.shadow.bias = -0.0003; // Adjusted to reduce shadow acne
   }
   
   loadTextures() {
@@ -99,6 +109,8 @@ export class TerrainRenderer {
     const colors = new Float32Array(geometry.attributes.position.count * 3);
     const colorAttribute = new THREE.BufferAttribute(colors, 3);
     geometry.setAttribute('color', colorAttribute);
+
+    
     
     const positions = geometry.attributes.position.array;
     
@@ -113,13 +125,13 @@ export class TerrainRenderer {
     const heightRange = maxHeight - minHeight;
     
     // Terrain type thresholds (normalized 0-1)
-    const waterLevel = 0.08;
-    const sandLevel = 0.12;
-    const lowGrassLevel = 0.30;
-    const midGrassLevel = 0.45;
-    const highGrassLevel = 0.60;
-    const rockLevel = 0.75;
-    const snowLineBase = 0.80;
+    const waterLevel = 0.06;
+    const sandLevel = 0.09;
+    const lowGrassLevel = 0.25;
+    const midGrassLevel = 0.40;
+    const highGrassLevel = 0.55;
+    const rockLevel = 0.70;
+    const snowLineBase = 0.78;
     
     // Slope thresholds
     const lowSlopeThreshold = 0.2;
@@ -162,19 +174,12 @@ export class TerrainRenderer {
         const sandVariation = noise * 0.1;
         color.multiplyScalar(1.0 + sandVariation);
       } 
-      else if (gradient > highSlopeThreshold) {
-        // Very steep areas (rock) - vary by height
-        if (normalizedHeight > rockLevel) {
-          // Higher rocks are lighter
-          color.copy(this.textures.rockLight);
-        } else if (normalizedHeight > midGrassLevel) {
-          // Mid-level rocks
-          color.copy(this.textures.rock);
-        } else {
-          // Lower rocks are darker
-          color.copy(this.textures.rockDark);
-        }
-      } 
+      else if (gradient > midSlopeThreshold) {
+        // Darken color based on slope
+        const shadowFactor = 1.0 - (gradient - midSlopeThreshold) * 0.5;
+        color.multiplyScalar(shadowFactor);
+      }
+      
       else if (normalizedHeight > snowLineBase) {
         // Snow regions - transition from rock to snow
         const snowiness = (normalizedHeight - snowLineBase) / (1 - snowLineBase);

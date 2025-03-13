@@ -232,5 +232,62 @@ function setupProfileSelector(selectElement) {
   }
 }
 
+// Update this function in main.js
+
+async function regenerateTerrain(profileName) {
+    console.log(`Regenerating terrain with ${profileName} profile...`);
+    
+    // Store current player position
+    const playerX = player.position.x;
+    const playerZ = player.position.z;
+    
+    // Remove old terrain mesh from scene
+    scene.remove(terrain.mesh);
+    
+    // Clear any waypoints
+    if (waypointSystem) {
+      waypointSystem.clearWaypoints();
+    }
+    
+    // Generate new terrain with selected profile
+    currentProfile = profileName;
+    const newTerrain = await generateTerrain(terrainWidth, terrainDepth, terrainHeight, profileName);
+    
+    // Add new terrain to scene
+    scene.add(newTerrain.mesh);
+    
+    // Update terrain references
+    terrain.mesh = newTerrain.mesh;
+    terrain.heightMap = newTerrain.heightMap;
+    terrain.profile = newTerrain.profile;
+    terrain.getHeightAt = newTerrain.getHeightAt;
+    terrain.isRidge = newTerrain.isRidge;
+    
+    // Update player position based on new terrain height
+    // Add a safety margin to ensure player is above terrain
+    const heightAtPlayerPos = newTerrain.getHeightAt(playerX, playerZ);
+    const safetyMargin = 2; // Extra units above terrain
+    
+    // Set player position with proper height
+    player.position.y = heightAtPlayerPos + player.height + safetyMargin;
+    
+    // Reset velocity to prevent falling through terrain
+    player.velocity.set(0, 0, 0);
+    player.isOnGround = true;
+    
+    // Update camera position
+    if (player.camera) {
+      player.camera.position.copy(player.position);
+    }
+    
+    // Regenerate waypoints if needed
+    if (waypointSystem) {
+      waypointSystem.terrain = newTerrain;
+      waypointSystem.generateWaypoints(8);
+    }
+    
+    console.log(`Terrain regenerated, player at (${playerX.toFixed(1)}, ${player.position.y.toFixed(1)}, ${playerZ.toFixed(1)})`);
+  }
+
 // Start the application when the DOM is loaded
 window.addEventListener('DOMContentLoaded', init);

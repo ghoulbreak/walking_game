@@ -9,13 +9,13 @@ const player = {
     x: 0, // Pitch (up/down)
     y: 0  // Yaw (left/right)
   },
-  speed: 12,       // Increased movement speed for larger terrain
-  sprintSpeed: 24, // Double speed when sprinting
+  speed: 10,       // Increased movement speed for larger terrain
+  sprintSpeed: 20, // Double speed when sprinting
   isRunning: false, // Track if player is running
-  jumpForce: 15,   // Increased jump height
+  jumpForce: 12,   // Increased jump height
   gravity: 25,     // Stronger gravity
   isOnGround: false,
-  height: 1.8,     // Player "eye" height
+  height: 1.6,     // Player "eye" height
   keys: {
     forward: false,
     backward: false,

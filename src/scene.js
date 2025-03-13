@@ -14,7 +14,7 @@ export function createScene() {
   
   // Create camera
   const camera = new THREE.PerspectiveCamera(
-    75, 
+    70, 
     window.innerWidth / window.innerHeight, 
     0.1, 
     2000 // Increased far plane for larger terrain

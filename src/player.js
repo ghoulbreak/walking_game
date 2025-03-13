@@ -2,39 +2,39 @@ import * as THREE from 'three';
 
 // Player state - adjusted for larger terrain scale
 const player = {
-    position: new THREE.Vector3(0, 0, 0),
-    velocity: new THREE.Vector3(0, 0, 0),
-    direction: new THREE.Vector3(0, 0, 1),
-    rotation: {
-      x: 0, // Pitch (up/down)
-      y: 0  // Yaw (left/right)
-    },
-    speed: 12,       // Increased movement speed for larger terrain
-    sprintSpeed: 24, // Double speed when sprinting
-    isRunning: false, // Track if player is running
-    jumpForce: 15,   // Increased jump height
-    gravity: 25,     // Stronger gravity
-    isOnGround: false,
-    height: 1.8,     // Player "eye" height
-    keys: {
-      forward: false,
-      backward: false,
-      left: false,
-      right: false,
-      jump: false,
-      sprint: false
-    },
-    mouse: {
-      sensitivity: 0.002,
-      locked: false
-    },
-    stamina: {
-      current: 100,
-      max: 100,
-      recoveryRate: 10,  // Stamina recovered per second
-      drainRate: 15      // Stamina used per second while sprinting
-    }
-  };
+  position: new THREE.Vector3(0, 0, 0),
+  velocity: new THREE.Vector3(0, 0, 0),
+  direction: new THREE.Vector3(0, 0, 1),
+  rotation: {
+    x: 0, // Pitch (up/down)
+    y: 0  // Yaw (left/right)
+  },
+  speed: 12,       // Increased movement speed for larger terrain
+  sprintSpeed: 24, // Double speed when sprinting
+  isRunning: false, // Track if player is running
+  jumpForce: 15,   // Increased jump height
+  gravity: 25,     // Stronger gravity
+  isOnGround: false,
+  height: 1.8,     // Player "eye" height
+  keys: {
+    forward: false,
+    backward: false,
+    left: false,
+    right: false,
+    jump: false,
+    sprint: false
+  },
+  mouse: {
+    sensitivity: 0.002,
+    locked: false
+  },
+  stamina: {
+    current: 100,
+    max: 100,
+    recoveryRate: 10,  // Stamina recovered per second
+    drainRate: 15      // Stamina used per second while sprinting
+  }
+};
 
 export function initPlayer(camera, terrain) {
   // Set initial position above terrain
@@ -54,52 +54,59 @@ export function initPlayer(camera, terrain) {
 }
 
 function setupKeyboardControls() {
-    document.addEventListener('keydown', (event) => {
-      switch (event.code) {
-        case 'KeyW':
-          player.keys.forward = true;
-          break;
-        case 'KeyS':
-          player.keys.backward = true;
-          break;
-        case 'KeyA':
-          player.keys.left = true;
-          break;
-        case 'KeyD':
-          player.keys.right = true;
-          break;
-        case 'Space':
-          if (player.isOnGround) {
-            player.velocity.y = player.jumpForce;
-            player.isOnGround = false;
-          }
-          break;
-        case 'ShiftLeft':
-          player.keys.sprint = true;
-          break;
-      }
-    });
-    
-    document.addEventListener('keyup', (event) => {
-      switch (event.code) {
-        case 'KeyW':
-          player.keys.forward = false;
-          break;
-        case 'KeyS':
-          player.keys.backward = false;
-          break;
-        case 'KeyA':
-          player.keys.left = false;
-          break;
-        case 'KeyD':
-          player.keys.right = false;
-          break;
-        case 'ShiftLeft':
-          player.keys.sprint = false;
-          break;
-      }
-    });
-  }
+  document.addEventListener('keydown', (event) => {
+    switch (event.code) {
+      case 'KeyW':
+        player.keys.forward = true;
+        break;
+      case 'KeyS':
+        player.keys.backward = true;
+        break;
+      case 'KeyA':
+        player.keys.left = true;
+        break;
+      case 'KeyD':
+        player.keys.right = true;
+        break;
+      case 'Space':
+        if (player.isOnGround) {
+          player.velocity.y = player.jumpForce;
+          player.isOnGround = false;
+        }
+        break;
+      case 'ShiftLeft':
+        player.keys.sprint = true;
+        break;
+        // Add this case to your keydown event listener in setupKeyboardControls
+      case 'KeyT':
+        // Teleport to a flat area (modify coordinates as needed)
+        if (terrain) {
+        teleportPlayer(player, 100, 100, terrain);
+        }
+        break;
+    }
+  });
+  
+  document.addEventListener('keyup', (event) => {
+    switch (event.code) {
+      case 'KeyW':
+        player.keys.forward = false;
+        break;
+      case 'KeyS':
+        player.keys.backward = false;
+        break;
+      case 'KeyA':
+        player.keys.left = false;
+        break;
+      case 'KeyD':
+        player.keys.right = false;
+        break;
+      case 'ShiftLeft':
+        player.keys.sprint = false;
+        break;
+    }
+  });
+}
 
 function setupMouseControls(camera) {
   // Request pointer lock when clicking on the canvas
@@ -132,11 +139,27 @@ function setupMouseControls(camera) {
   });
 }
 
+// This is the fixed version of the updatePlayer function for src/player.js
+
 export function updatePlayer(player, deltaTime, terrain) {
     // Handle NaN or undefined deltaTime
     if (!deltaTime || isNaN(deltaTime)) {
       deltaTime = 0.016; // Default to 60fps if deltaTime is invalid
     }
+    
+    // Update stamina
+    if (player.keys.sprint && (player.keys.forward || player.keys.backward || player.keys.left || player.keys.right)) {
+      // Drain stamina while sprinting and moving
+      player.stamina.current = Math.max(0, player.stamina.current - player.stamina.drainRate * deltaTime);
+      player.isRunning = player.stamina.current > 0; // Can only run if we have stamina
+    } else {
+      // Recover stamina when not sprinting
+      player.stamina.current = Math.min(player.stamina.max, player.stamina.current + player.stamina.recoveryRate * deltaTime);
+      player.isRunning = false;
+    }
+    
+    // Determine current speed based on sprint state
+    const currentSpeed = player.isRunning ? player.sprintSpeed : player.speed;
     
     // Calculate movement direction vector based on keyboard input
     const moveDirection = new THREE.Vector3(0, 0, 0);
@@ -166,7 +189,7 @@ export function updatePlayer(player, deltaTime, terrain) {
     const rotatedDirection = moveDirection.clone();
     rotatedDirection.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation.y);
     
-    // Store the intended movement for slope calculation
+    // Calculate intended movement
     const intendedMovementX = rotatedDirection.x * currentSpeed;
     const intendedMovementZ = rotatedDirection.z * currentSpeed;
     
@@ -176,44 +199,40 @@ export function updatePlayer(player, deltaTime, terrain) {
     
     // Apply slope physics if we're actually trying to move and on the ground
     if (terrain && player.isOnGround && (intendedMovementX !== 0 || intendedMovementZ !== 0)) {
-        try {
-        // Get normalized movement direction
-        const moveDirX = intendedMovementX === 0 ? 0 : intendedMovementX / Math.abs(intendedMovementX);
-        const moveDirZ = intendedMovementZ === 0 ? 0 : intendedMovementZ / Math.abs(intendedMovementZ);
-        
-        // Calculate the slope difficulty factor
+      try {
+        // Get slope factor
         const slopeFactor = calculateSlopeDifficulty(
-            player, moveDirX, moveDirZ, terrain, deltaTime
+          player, intendedMovementX, intendedMovementZ, terrain
         );
         
         if (slopeFactor >= 0) {
-            // Normal movement with slope slowdown
-            player.velocity.x *= slopeFactor;
-            player.velocity.z *= slopeFactor;
+          // Normal movement with slope slowdown
+          player.velocity.x *= slopeFactor;
+          player.velocity.z *= slopeFactor;
         } else {
-            // Negative factor means sliding downhill
-            // Find downhill direction
-            const currentHeight = terrain.getHeightAt(player.position.x, player.position.z);
-            
-            // Check in 4 directions to find downhill
-            const checkDist = 2.0;
-            const heightN = terrain.getHeightAt(player.position.x, player.position.z - checkDist);
-            const heightS = terrain.getHeightAt(player.position.x, player.position.z + checkDist);
-            const heightE = terrain.getHeightAt(player.position.x + checkDist, player.position.z);
-            const heightW = terrain.getHeightAt(player.position.x - checkDist, player.position.z);
-            
-            // Calculate downhill vector (negative because we want to go downhill)
-            let downX = 0;
-            let downZ = 0;
-            
-            if (heightE < heightW) downX += 1;
-            if (heightW < heightE) downX -= 1;
-            if (heightS < heightN) downZ += 1;
-            if (heightN < heightS) downZ -= 1;
-            
-            // Normalize
-            const downMag = Math.sqrt(downX * downX + downZ * downZ);
-            if (downMag > 0) {
+          // Negative factor means sliding downhill
+          // Find downhill direction
+          const currentHeight = terrain.getHeightAt(player.position.x, player.position.z);
+          
+          // Check in 4 directions to find downhill
+          const checkDist = 2.0;
+          const heightN = terrain.getHeightAt(player.position.x, player.position.z - checkDist);
+          const heightS = terrain.getHeightAt(player.position.x, player.position.z + checkDist);
+          const heightE = terrain.getHeightAt(player.position.x + checkDist, player.position.z);
+          const heightW = terrain.getHeightAt(player.position.x - checkDist, player.position.z);
+          
+          // Calculate downhill vector (negative because we want to go downhill)
+          let downX = 0;
+          let downZ = 0;
+          
+          if (heightE < heightW) downX += 1;
+          if (heightW < heightE) downX -= 1;
+          if (heightS < heightN) downZ += 1;
+          if (heightN < heightS) downZ -= 1;
+          
+          // Normalize
+          const downMag = Math.sqrt(downX * downX + downZ * downZ);
+          if (downMag > 0) {
             downX /= downMag;
             downZ /= downMag;
             
@@ -221,12 +240,12 @@ export function updatePlayer(player, deltaTime, terrain) {
             const slideSpeed = currentSpeed * Math.abs(slopeFactor) * 1.5;
             player.velocity.x = downX * slideSpeed;
             player.velocity.z = downZ * slideSpeed;
-            }
+          }
         }
-        } catch (e) {
+      } catch (e) {
         console.error("Error applying slope physics:", e);
         // We already set up the basic velocity above, so no fallback needed
-        }
+      }
     }
     
     // Apply gravity
@@ -267,3 +286,77 @@ export function updatePlayer(player, deltaTime, terrain) {
       camera.position.copy(player.position);
     }
   }
+  
+  // Helper function to calculate slope difficulty
+  function calculateSlopeDifficulty(player, intendedX, intendedZ, terrain) {
+    // Get current height and positions
+    const currentX = player.position.x;
+    const currentZ = player.position.z;
+    const currentHeight = terrain.getHeightAt(currentX, currentZ);
+    
+    // Sample point in the direction of movement to determine slope
+    const sampleDistance = 1.0; // Distance to check ahead
+    const moveDir = new THREE.Vector2(intendedX, intendedZ).normalize();
+    
+    // Calculate sample position
+    const sampleX = currentX + moveDir.x * sampleDistance;
+    const sampleZ = currentZ + moveDir.y * sampleDistance;
+    const sampleHeight = terrain.getHeightAt(sampleX, sampleZ);
+    
+    // Calculate slope angle
+    const heightDiff = sampleHeight - currentHeight;
+    const slopeAngle = Math.atan2(heightDiff, sampleDistance);
+    const slopeAngleDegrees = slopeAngle * 180 / Math.PI;
+    
+    // Slope difficulty thresholds
+    const maxUphill = 35; // Maximum degrees uphill player can climb
+    const maxDownhill = -45; // Maximum downhill angle before sliding
+    
+    // Uphill logic
+    if (slopeAngleDegrees > 0) {
+      if (slopeAngleDegrees > maxUphill) {
+        // Too steep to climb
+        return 0;
+      } else {
+        // Gradually reduce speed as slope gets steeper
+        return 1 - (slopeAngleDegrees / maxUphill) * 0.7;
+      }
+    } 
+    // Downhill logic
+    else {
+      if (slopeAngleDegrees < maxDownhill) {
+        // Too steep, will slide
+        return slopeAngleDegrees / 90; // Negative value indicating sliding
+      } else {
+        // Downhill is slightly faster
+        return 1 + (Math.abs(slopeAngleDegrees) / 45) * 0.2;
+      }
+    }
+  }
+// Function to teleport the player to a specific position
+export function teleportPlayer(player, x, z, terrain) {
+    // Get height at the target position
+    const height = terrain.getHeightAt(x, z);
+    
+    // Set player position
+    player.position.set(x, height + player.height, z);
+    
+    // Reset velocity
+    player.velocity.set(0, 0, 0);
+    
+    // Set as grounded
+    player.isOnGround = true;
+    
+    console.log(`Teleported to position (${x}, ${height + player.height}, ${z})`);
+    
+    // If the player has a camera reference, update it
+    if (player.camera) {
+      player.camera.position.copy(player.position);
+    }
+    
+    return { x, y: height + player.height, z };
+  }
+  
+  // You can call this from your main.js file or add a keyboard shortcut
+  // For example:
+  // teleportPlayer(player, 50, 50, terrain); // Teleport to (50, y, 50)

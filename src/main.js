@@ -51,6 +51,35 @@ async function init() {
   const waypointSystem = new WaypointSystem(scene, terrain);
   const waypoints = waypointSystem.generateWaypoints(8); // Generate 8 waypoints
   
+  // Add teleport feature for testing (T key)
+  document.addEventListener('keydown', (event) => {
+    if (event.code === 'KeyT') {
+      // Teleport to a random flat area
+      const attempts = 20; // Try up to 20 locations to find a flat spot
+      for (let i = 0; i < attempts; i++) {
+        const x = (Math.random() - 0.5) * terrainWidth * 0.5;
+        const z = (Math.random() - 0.5) * terrainDepth * 0.5;
+        const height = terrain.getHeightAt(x, z);
+        
+        // Check surrounding heights to find a flat area
+        const surroundingSlope = Math.max(
+          Math.abs(height - terrain.getHeightAt(x + 5, z)),
+          Math.abs(height - terrain.getHeightAt(x - 5, z)),
+          Math.abs(height - terrain.getHeightAt(x, z + 5)),
+          Math.abs(height - terrain.getHeightAt(x, z - 5))
+        );
+        
+        // If slope is less than 3 units, it's relatively flat
+        if (surroundingSlope < 3) {
+          player.position.set(x, height + player.height + 2, z);
+          player.velocity.set(0, 0, 0);
+          console.log(`Teleported to (${x.toFixed(1)}, ${height.toFixed(1)}, ${z.toFixed(1)})`);
+          break;
+        }
+      }
+    }
+  });
+  
   // Animation loop
   function animate(currentTime) {
     requestAnimationFrame(animate);
@@ -67,30 +96,38 @@ async function init() {
       fpsDisplay.textContent = `FPS: ${fps.toFixed(1)}`;
     }
     
+    // Update player movement
+    updatePlayer(player, deltaTime, terrain);
+    
+    // Update waypoint system
+    if (waypointSystem) {
+      waypointSystem.update(player.position);
+    }
+    
     // Update position display
     if (positionDisplay) {
-        const pos = player.position;
-        positionDisplay.textContent = `Position: (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`;
-      }
+      const pos = player.position;
+      positionDisplay.textContent = `Position: (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`;
+    }
+    
+    // Update elevation display
+    if (elevationDisplay && terrain) {
+      const groundHeight = terrain.getHeightAt(player.position.x, player.position.z);
+      elevationDisplay.textContent = `Elevation: ${groundHeight.toFixed(1)}m`;
+    }
+    
+    // Update stamina bar
+    if (staminaBar) {
+      const staminaPercent = (player.stamina.current / player.stamina.max) * 100;
+      staminaBar.style.width = `${staminaPercent}%`;
       
-      // Update elevation display
-      if (elevationDisplay && terrain) {
-        const groundHeight = terrain.getHeightAt(player.position.x, player.position.z);
-        elevationDisplay.textContent = `Elevation: ${groundHeight.toFixed(1)}m`;
+      // Change color when stamina is low
+      if (staminaPercent < 30) {
+        staminaBar.classList.add('stamina-low');
+      } else {
+        staminaBar.classList.remove('stamina-low');
       }
-      
-      // Update stamina bar
-      if (staminaBar) {
-        const staminaPercent = (player.stamina.current / player.stamina.max) * 100;
-        staminaBar.style.width = `${staminaPercent}%`;
-        
-        // Change color when stamina is low
-        if (staminaPercent < 30) {
-          staminaBar.classList.add('stamina-low');
-        } else {
-          staminaBar.classList.remove('stamina-low');
-        }
-      }
+    }
     
     // Render the scene
     renderer.render(scene, camera);

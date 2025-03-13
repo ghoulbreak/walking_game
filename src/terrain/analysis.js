@@ -1,128 +1,213 @@
 import * as THREE from 'three';
 
-// Class for analyzing the terrain to find interesting features
+// Modified TerrainAnalyzer to work with chunked terrain
 export class TerrainAnalyzer {
   constructor(terrain) {
     this.terrain = terrain;
-    this.width = terrain.width;
-    this.depth = terrain.depth;
-    this.heightMap = terrain.heightMap;
-  }
-  
-  // Find ridge lines on the terrain
-  findRidges(threshold = 0.5) {
-    return this.findTerrainFeature(threshold, (horizontalDiff, verticalDiff) => 
-      (horizontalDiff > threshold && Math.abs(verticalDiff) < threshold) || 
-      (verticalDiff > threshold && Math.abs(horizontalDiff) < threshold)
-    );
-  }
-  
-  // Find valleys on the terrain
-  findValleys(threshold = 0.5) {
-    return this.findTerrainFeature(threshold, (horizontalDiff, verticalDiff) => 
-      (horizontalDiff < -threshold && Math.abs(verticalDiff) < threshold) || 
-      (verticalDiff < -threshold && Math.abs(horizontalDiff) < threshold)
-    );
-  }
-  
-  // Generic terrain feature finder
-  findTerrainFeature(threshold, conditionFn) {
-    const points = [];
-    const gridSize = 5; // Check every nth point for performance
     
-    for (let z = gridSize; z < this.depth - gridSize; z += gridSize) {
-      for (let x = gridSize; x < this.width - gridSize; x += gridSize) {
-        // Calculate neighbor differences
-        const idx = z * this.width + x;
-        const height = this.heightMap[idx];
+    // For chunked terrain, we work with a virtual grid
+    this.sampleSize = 8; // Sample every Nth point for performance
+    this.analysisGridSize = 128; // Size of local analysis grid
+  }
+  
+  // Analyze a local area of terrain around a point
+  analyzeLocalArea(centerX, centerZ, radius = 64) {
+    const halfSize = radius / 2;
+    const samples = [];
+    
+    // Sample points in a grid around the center
+    for (let z = -radius; z <= radius; z += this.sampleSize) {
+      for (let x = -radius; x <= radius; x += this.sampleSize) {
+        const worldX = centerX + x;
+        const worldZ = centerZ + z;
         
-        const east = this.heightMap[idx + 1] || 0;
-        const west = this.heightMap[idx - 1] || 0;
-        const north = this.heightMap[idx - this.width] || 0;
-        const south = this.heightMap[idx + this.width] || 0;
+        // Get height at this point
+        const height = this.terrain.getHeightAt(worldX, worldZ);
         
-        const horizontalDiff = (height - east) * (height - west);
-        const verticalDiff = (height - north) * (height - south);
-        
-        if (conditionFn(horizontalDiff, verticalDiff)) {
-          // Convert to world coordinates
-          const worldX = x - this.width / 2;
-          const worldZ = z - this.depth / 2;
-          const worldHeight = this.terrain.getHeightAt(worldX, worldZ);
-          points.push(new THREE.Vector3(worldX, worldHeight, worldZ));
+        if (height !== null && !isNaN(height)) {
+          samples.push({
+            x: worldX,
+            z: worldZ,
+            y: height,
+            // Store grid coordinates for analysis
+            gridX: Math.floor((x + radius) / this.sampleSize),
+            gridZ: Math.floor((z + radius) / this.sampleSize)
+          });
         }
       }
     }
     
-    return points;
+    return samples;
   }
   
-  // Find peaks on the terrain
-  findPeaks(threshold = 5) {
-    const peakPoints = [];
-    const gridSize = 10; // Check every nth point for performance
+  // Find ridge lines in the local area
+  findLocalRidges(centerX, centerZ, radius = 64, threshold = 5) {
+    const samples = this.analyzeLocalArea(centerX, centerZ, radius);
+    const gridSize = Math.floor(radius * 2 / this.sampleSize);
+    const heightGrid = Array(gridSize).fill().map(() => Array(gridSize).fill(null));
     
-    for (let z = gridSize; z < this.depth - gridSize; z += gridSize) {
-      for (let x = gridSize; x < this.width - gridSize; x += gridSize) {
-        const idx = z * this.width + x;
-        const height = this.heightMap[idx];
-        let isPeak = true;
-        
-        // Check all surrounding points
-        checkNeighbors: 
-        for (let dz = -1; dz <= 1; dz++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            if (dx === 0 && dz === 0) continue;
-            
-            const nx = x + dx;
-            const nz = z + dz;
-            
-            // Skip if out of bounds
-            if (nx < 0 || nx >= this.width || nz < 0 || nz >= this.depth) continue;
-            
-            const neighborHeight = this.heightMap[nz * this.width + nx];
-            
-            // If any neighbor is higher or equal, not a peak
-            if (neighborHeight >= height - threshold) {
-              isPeak = false;
-              break checkNeighbors;
-            }
+    // Fill height grid
+    for (const sample of samples) {
+      if (sample.gridX >= 0 && sample.gridX < gridSize && 
+          sample.gridZ >= 0 && sample.gridZ < gridSize) {
+        heightGrid[sample.gridZ][sample.gridX] = sample.y;
+      }
+    }
+    
+    // Find ridge points
+    const ridgePoints = [];
+    
+    for (const sample of samples) {
+      const { gridX, gridZ } = sample;
+      
+      // Skip edge points
+      if (gridX < 1 || gridX >= gridSize - 1 || gridZ < 1 || gridZ >= gridSize - 1) {
+        continue;
+      }
+      
+      // Get heights of neighbors
+      const height = heightGrid[gridZ][gridX];
+      const west = heightGrid[gridZ][gridX - 1];
+      const east = heightGrid[gridZ][gridX + 1];
+      const north = heightGrid[gridZ - 1][gridX];
+      const south = heightGrid[gridZ + 1][gridX];
+      
+      // Skip if any neighbor is null
+      if (west === null || east === null || north === null || south === null) {
+        continue;
+      }
+      
+      const horizontalDiff = (height - east) * (height - west);
+      const verticalDiff = (height - north) * (height - south);
+      
+      // Detect ridge points (local maxima in at least one direction)
+      if ((horizontalDiff > 0 && Math.abs(verticalDiff) < threshold) || 
+          (verticalDiff > 0 && Math.abs(horizontalDiff) < threshold)) {
+        ridgePoints.push(new THREE.Vector3(sample.x, sample.y, sample.z));
+      }
+    }
+    
+    return ridgePoints;
+  }
+  
+  // Find significant peaks in the local area
+  findLocalPeaks(centerX, centerZ, radius = 64, threshold = 5) {
+    const samples = this.analyzeLocalArea(centerX, centerZ, radius);
+    const gridSize = Math.floor(radius * 2 / this.sampleSize);
+    const heightGrid = Array(gridSize).fill().map(() => Array(gridSize).fill(null));
+    
+    // Fill height grid
+    for (const sample of samples) {
+      if (sample.gridX >= 0 && sample.gridX < gridSize && 
+          sample.gridZ >= 0 && sample.gridZ < gridSize) {
+        heightGrid[sample.gridZ][sample.gridX] = sample.y;
+      }
+    }
+    
+    // Find peak points
+    const peakPoints = [];
+    
+    for (const sample of samples) {
+      const { gridX, gridZ } = sample;
+      
+      // Skip edge points
+      if (gridX < 1 || gridX >= gridSize - 1 || gridZ < 1 || gridZ >= gridSize - 1) {
+        continue;
+      }
+      
+      // Get heights of neighbors (8-connected)
+      const height = heightGrid[gridZ][gridX];
+      let isPeak = true;
+      
+      // Check all 8 neighbors
+      for (let dz = -1; dz <= 1; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dz === 0) continue;
+          
+          const nx = gridX + dx;
+          const nz = gridZ + dz;
+          
+          if (nx < 0 || nx >= gridSize || nz < 0 || nz >= gridSize) continue;
+          
+          const neighborHeight = heightGrid[nz][nx];
+          if (neighborHeight === null) continue;
+          
+          // If any neighbor is higher, not a peak
+          if (neighborHeight >= height) {
+            isPeak = false;
+            break;
           }
         }
-        
-        if (isPeak) {
-          const worldX = x - this.width / 2;
-          const worldZ = z - this.depth / 2;
-          const worldHeight = this.terrain.getHeightAt(worldX, worldZ);
-          peakPoints.push(new THREE.Vector3(worldX, worldHeight, worldZ));
-        }
+        if (!isPeak) break;
+      }
+      
+      if (isPeak) {
+        peakPoints.push(new THREE.Vector3(sample.x, sample.y, sample.z));
       }
     }
     
     return peakPoints;
   }
   
-  // Generate a path along ridge lines
-  generateRidgePath(numPoints = 10) {
-    const ridgePoints = this.findRidges();
+  // Generate a path connecting interesting features
+  generateFeaturePath(centerX, centerZ, numPoints = 8) {
+    // Find ridges and peaks
+    const ridges = this.findLocalRidges(centerX, centerZ, 100);
+    const peaks = this.findLocalPeaks(centerX, centerZ, 100);
     
-    // If not enough ridge points, return what we have
-    if (ridgePoints.length < numPoints) {
-      return ridgePoints;
+    // Combine interesting points, prioritizing peaks
+    const interestPoints = [...peaks];
+    
+    // Add some ridge points if needed
+    if (interestPoints.length < numPoints && ridges.length > 0) {
+      // Sort ridges by height
+      ridges.sort((a, b) => b.y - a.y);
+      
+      // Add highest ridges
+      const ridgesToAdd = Math.min(ridges.length, numPoints - interestPoints.length);
+      for (let i = 0; i < ridgesToAdd; i++) {
+        interestPoints.push(ridges[i]);
+      }
     }
     
-    // Find points along the longest ridge
-    return this.findLongestPath(ridgePoints, numPoints);
+    // If still not enough points, add some random points
+    if (interestPoints.length < numPoints) {
+      const radius = 100;
+      for (let i = interestPoints.length; i < numPoints; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const distance = 20 + Math.random() * radius;
+        
+        const x = centerX + Math.cos(angle) * distance;
+        const z = centerZ + Math.sin(angle) * distance;
+        const y = this.terrain.getHeightAt(x, z);
+        
+        if (y !== null && !isNaN(y)) {
+          interestPoints.push(new THREE.Vector3(x, y, z));
+        }
+      }
+    }
+    
+    // Always include a point near the player for path start
+    const playerNearbyPoint = new THREE.Vector3(
+      centerX + (Math.random() - 0.5) * 20,
+      0,
+      centerZ + (Math.random() - 0.5) * 20
+    );
+    const heightAtPlayer = this.terrain.getHeightAt(playerNearbyPoint.x, playerNearbyPoint.z);
+    if (heightAtPlayer !== null && !isNaN(heightAtPlayer)) {
+      playerNearbyPoint.y = heightAtPlayer;
+      interestPoints.unshift(playerNearbyPoint);
+    }
+    
+    // Create a path from the interest points
+    return this.createPath(interestPoints, numPoints);
   }
   
-  // Find the longest path through a set of points
-  findLongestPath(points, maxPoints) {
-    if (points.length <= maxPoints) return points;
+  // Create a path from a set of points
+  createPath(points, maxPoints) {
+    if (points.length <= 2) return points;
     
-    // Sort by height for interest
-    points.sort((a, b) => b.y - a.y);
-    
-    // Start with the highest point
+    // Start with the first point (near player)
     const path = [points[0]];
     const remainingPoints = new Set(points.slice(1));
     
@@ -137,8 +222,14 @@ export class TerrainAnalyzer {
         const distance = lastPoint.distanceTo(point);
         if (distance < 5) continue; // Too close, skip
         
+        // Score based on distance (not too far, not too close)
+        const distanceScore = -Math.abs(distance - 50);
+        
+        // Height difference (prefer more interesting terrain changes)
         const heightDiff = Math.abs(lastPoint.y - point.y);
-        const score = -distance * 0.5 - heightDiff * 2;
+        const heightScore = heightDiff * 0.5;
+        
+        const score = distanceScore + heightScore;
         
         if (score > bestScore) {
           bestScore = score;
@@ -157,9 +248,9 @@ export class TerrainAnalyzer {
     return path;
   }
   
-  // Create visual markers for waypoints
+  // Helper methods for visualizing the analysis
   createWaypointMarkers(points, scene) {
-    const waypoints = [];
+    const markers = [];
     const colors = [0x00ff00, 0xffff00, 0xff0000]; // Start, middle, end
     
     points.forEach((point, index) => {
@@ -175,14 +266,15 @@ export class TerrainAnalyzer {
       marker.position.y += 2; // Raise slightly above terrain
       
       scene.add(marker);
-      waypoints.push(marker);
+      markers.push(marker);
     });
     
-    return waypoints;
+    return markers;
   }
   
-  // Create a line connecting waypoints
   createWaypointPath(points, scene) {
+    if (points.length < 2) return null;
+    
     // Create line with elevated points
     const linePoints = points.map(point => {
       const linePoint = point.clone();

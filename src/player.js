@@ -6,10 +6,10 @@ const player = {
   velocity: new THREE.Vector3(0, 0, 0),
   direction: new THREE.Vector3(0, 0, 1),
   rotation: { x: 0, y: 0 },
-  speed: 10,
-  sprintSpeed: 20,
+  speed: 12,         // Faster base speed for larger terrain
+  sprintSpeed: 24,   // Faster sprint for larger terrain
   isRunning: false,
-  jumpForce: 12,
+  jumpForce: 15,     // Stronger jump for larger terrain
   gravity: 25,
   isOnGround: false,
   height: 1.6,
@@ -28,8 +28,8 @@ const player = {
   stamina: {
     current: 100,
     max: 100,
-    recoveryRate: 10,
-    drainRate: 15
+    recoveryRate: 15,  // Faster stamina recovery
+    drainRate: 12      // Slower stamina drain
   }
 };
 
@@ -38,7 +38,7 @@ export function initPlayer(camera, terrain) {
   const startX = 0;
   const startZ = 0;
   const heightAtStart = terrain.getHeightAt(startX, startZ);
-  player.position.set(startX, heightAtStart + player.height, startZ);
+  player.position.set(startX, heightAtStart + player.height + 5, startZ);
   camera.position.copy(player.position);
   
   setupKeyboardControls();
@@ -109,6 +109,7 @@ function setupMouseControls(camera) {
 export function updatePlayer(player, deltaTime, terrain) {
   // Safety checks
   if (!deltaTime || isNaN(deltaTime)) deltaTime = 0.016;
+  deltaTime = Math.min(deltaTime, 0.1); // Cap delta time to prevent huge jumps
   
   // Update stamina
   const isMoving = player.keys.forward || player.keys.backward || player.keys.left || player.keys.right;
@@ -162,21 +163,32 @@ export function updatePlayer(player, deltaTime, terrain) {
         
         // Calculate normalized downhill vector
         let downX = 0, downZ = 0;
+        let validHeights = 0;
         
-        if (heightE < heightW) downX += 1;
-        if (heightW < heightE) downX -= 1;
-        if (heightS < heightN) downZ += 1;
-        if (heightN < heightS) downZ -= 1;
+        if (heightE !== null && heightW !== null) {
+          if (heightE < heightW) downX += 1;
+          if (heightW < heightE) downX -= 1;
+          validHeights++;
+        }
         
-        const downMag = Math.sqrt(downX * downX + downZ * downZ);
-        if (downMag > 0) {
-          downX /= downMag;
-          downZ /= downMag;
-          
-          // Apply sliding
-          const slideSpeed = currentSpeed * Math.abs(slopeFactor) * 1.5;
-          player.velocity.x = downX * slideSpeed;
-          player.velocity.z = downZ * slideSpeed;
+        if (heightS !== null && heightN !== null) {
+          if (heightS < heightN) downZ += 1;
+          if (heightN < heightS) downZ -= 1;
+          validHeights++;
+        }
+        
+        // Only apply sliding if we have valid heights
+        if (validHeights > 0) {
+          const downMag = Math.sqrt(downX * downX + downZ * downZ);
+          if (downMag > 0) {
+            downX /= downMag;
+            downZ /= downMag;
+            
+            // Apply sliding
+            const slideSpeed = currentSpeed * Math.abs(slopeFactor) * 1.5;
+            player.velocity.x = downX * slideSpeed;
+            player.velocity.z = downZ * slideSpeed;
+          }
         }
       }
     } catch (e) {
@@ -198,20 +210,29 @@ export function updatePlayer(player, deltaTime, terrain) {
   if (terrain) {
     try {
       const terrainHeight = terrain.getHeightAt(player.position.x, player.position.z);
-      const playerBottom = player.position.y - player.height;
       
-      if (playerBottom < terrainHeight) {
-        // Move up to terrain level
-        player.position.y = terrainHeight + player.height;
-        player.velocity.y = 0;
-        player.isOnGround = true;
-      } else if (Math.abs(playerBottom - terrainHeight) < 0.1) {
-        player.isOnGround = true;
+      // Only process collision if we have a valid height
+      if (terrainHeight !== null && !isNaN(terrainHeight)) {
+        const playerBottom = player.position.y - player.height;
+        
+        if (playerBottom < terrainHeight) {
+          // Move up to terrain level
+          player.position.y = terrainHeight + player.height;
+          player.velocity.y = 0;
+          player.isOnGround = true;
+        } else if (Math.abs(playerBottom - terrainHeight) < 0.1) {
+          player.isOnGround = true;
+        } else {
+          player.isOnGround = false;
+        }
       } else {
+        // No valid height found - we might be outside the terrain
+        // Just keep falling with gravity
         player.isOnGround = false;
       }
     } catch (e) {
       // Error handling for terrain issues
+      console.warn("Error in terrain collision", e);
     }
   }
   
@@ -228,12 +249,16 @@ function calculateSlopeDifficulty(player, intendedX, intendedZ, terrain) {
   const currentZ = player.position.z;
   const currentHeight = terrain.getHeightAt(currentX, currentZ);
   
+  if (currentHeight === null || isNaN(currentHeight)) return 1.0; // Default to normal movement
+  
   const sampleDistance = 1.0;
   const moveDir = new THREE.Vector2(intendedX, intendedZ).normalize();
   
   const sampleX = currentX + moveDir.x * sampleDistance;
   const sampleZ = currentZ + moveDir.y * sampleDistance;
   const sampleHeight = terrain.getHeightAt(sampleX, sampleZ);
+  
+  if (sampleHeight === null || isNaN(sampleHeight)) return 1.0; // Default to normal movement
   
   // Calculate slope angle
   const heightDiff = sampleHeight - currentHeight;
@@ -266,14 +291,14 @@ export function teleportPlayer(player, x, z, terrain) {
   
   try {
     const height = terrain.getHeightAt(x, z);
-    if (isNaN(height)) return null;
+    if (isNaN(height) || height === null) return null;
     
-    const safetyMargin = 2;
+    const safetyMargin = 5;
     
     // Set position and reset physics
     player.position.set(x, height + player.height + safetyMargin, z);
     player.velocity.set(0, 0, 0);
-    player.isOnGround = true;
+    player.isOnGround = false;
     
     // Update camera
     if (player.camera) {
@@ -286,6 +311,7 @@ export function teleportPlayer(player, x, z, terrain) {
       z: player.position.z
     };
   } catch (error) {
+    console.error("Teleport error:", error);
     return null;
   }
 }

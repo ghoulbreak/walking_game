@@ -1,9 +1,9 @@
+// src/main.js
 import * as THREE from 'three';
 
-// src/main.js
 import { createScene, resizeHandler } from './scene.js';
 import { initPlayer, updatePlayer, teleportPlayer } from './player.js';
-import { TerrainChunkManager } from './terrain/chunk-manager.js';
+import { HierarchicalTerrainManager } from './terrain/hierarchical-terrain-manager.js';
 import { WaypointSystem } from './waypoint-system.js';
 import { TerrainProfiles, defaultProfile } from './terrain/profiles.js';
 import { launchTerrainComparison } from './terrain/tester.js';
@@ -79,13 +79,13 @@ async function init() {
   // Add window resize handler
   window.addEventListener('resize', () => resizeHandler(camera, renderer));
   
-  updateLoadingProgress(30, "Initializing terrain system...");
+  updateLoadingProgress(30, "Generating macro terrain...");
   
-  // Initialize terrain chunk manager with smaller initial chunks for faster loading
-  terrainManager = new TerrainChunkManager(scene, 256, 2);
+  // Initialize hierarchical terrain manager
+  terrainManager = new HierarchicalTerrainManager(scene);
   await terrainManager.initialize(currentProfile);
   
-  updateLoadingProgress(70, "Setting up player...");
+  updateLoadingProgress(80, "Setting up player...");
   
   // Make terrain accessible to player system
   window.terrain = {
@@ -99,9 +99,9 @@ async function init() {
   player.camera = camera;
   
   // Start at elevated position for better view
-  const startX = 0, startZ = -50;
+  const startX = 0, startZ = 0;
   const heightAtStart = terrainManager.getHeightAt(startX, startZ);
-  player.position.set(startX, heightAtStart + player.height + 5, startZ);
+  player.position.set(startX, heightAtStart + player.height + 10, startZ);
   camera.position.copy(player.position);
   
   updateLoadingProgress(90, "Creating waypoints...");
@@ -125,7 +125,7 @@ async function init() {
     setTimeout(() => {
       loadingScreen.style.display = 'none';
     }, 500);
-  }, 500);
+  }, 1000); // Longer delay to ensure terrain is visible
   
   // Start animation loop
   animate(0);
@@ -133,6 +133,25 @@ async function init() {
 
 // Regenerate terrain with a new profile
 async function changeTerrainProfile(profileName) {
+  // Show a simple loading screen during profile change
+  const loadingOverlay = document.createElement('div');
+  loadingOverlay.style.position = 'fixed';
+  loadingOverlay.style.top = '0';
+  loadingOverlay.style.left = '0';
+  loadingOverlay.style.width = '100%';
+  loadingOverlay.style.height = '100%';
+  loadingOverlay.style.background = 'rgba(0, 0, 0, 0.7)';
+  loadingOverlay.style.color = 'white';
+  loadingOverlay.style.display = 'flex';
+  loadingOverlay.style.justifyContent = 'center';
+  loadingOverlay.style.alignItems = 'center';
+  loadingOverlay.style.zIndex = '1000';
+  loadingOverlay.innerHTML = `<div>Generating ${profileName} terrain...</div>`;
+  document.body.appendChild(loadingOverlay);
+  
+  // Wait a frame to ensure UI updates
+  await new Promise(resolve => setTimeout(resolve, 50));
+  
   // Store player position
   const playerPosition = player.position.clone();
   
@@ -145,17 +164,22 @@ async function changeTerrainProfile(profileName) {
   
   // Reposition player safely
   const heightAtPlayerPos = terrainManager.getHeightAt(playerPosition.x, playerPosition.z);
-  player.position.y = heightAtPlayerPos + player.height + 2;
+  player.position.y = heightAtPlayerPos + player.height + 5;
   player.velocity.set(0, 0, 0);
-  player.isOnGround = true;
+  player.isOnGround = false;
   
   // Update camera
   player.camera.position.copy(player.position);
   
   // Regenerate waypoints
   if (waypointSystem) {
-    waypointSystem.generateWaypoints(8);
+    waypointSystem.generateWaypoints(8, player.position);
   }
+  
+  // Remove loading overlay after a short delay
+  setTimeout(() => {
+    document.body.removeChild(loadingOverlay);
+  }, 300);
 }
 
 // Set up profile selector dropdown
@@ -216,11 +240,22 @@ function addExtendedControls() {
     debugButton.textContent = isDebug ? 'Hide Chunk Debug View' : 'Show Chunk Debug View';
   });
   
+  // Teleport button
+  const teleportButton = document.createElement('button');
+  teleportButton.textContent = 'Teleport to Random Location';
+  teleportButton.className = 'ui-button';
+  teleportButton.style.marginTop = '10px';
+  
+  teleportButton.addEventListener('click', () => {
+    findAndTeleportToFlatArea();
+  });
+  
   // Assemble controls
   controlsDiv.appendChild(viewDistanceLabel);
   controlsDiv.appendChild(viewDistanceValue);
   controlsDiv.appendChild(viewDistanceSlider);
   controlsDiv.appendChild(debugButton);
+  controlsDiv.appendChild(teleportButton);
   
   document.body.appendChild(controlsDiv);
 }
@@ -252,28 +287,68 @@ function setupKeyboardShortcuts() {
 
 // Find a flat area and teleport there
 function findAndTeleportToFlatArea() {
-  const chunkSize = terrainManager.chunkSize;
   const centerX = player.position.x;
   const centerZ = player.position.z;
-  const searchRadius = chunkSize * 0.8;
-  const attempts = 20;
+  
+  // Larger search area for better spots
+  const searchRadius = 1000; 
+  const attempts = 30;
   
   for (let i = 0; i < attempts; i++) {
-    const x = centerX + (Math.random() - 0.5) * searchRadius * 2;
-    const z = centerZ + (Math.random() - 0.5) * searchRadius * 2;
+    const angle = Math.random() * Math.PI * 2;
+    const distance = Math.random() * searchRadius;
+    
+    const x = centerX + Math.cos(angle) * distance;
+    const z = centerZ + Math.sin(angle) * distance;
     const height = terrainManager.getHeightAt(x, z);
     
     // Check surrounding heights to find a flat area
-    const surroundingSlope = Math.max(
-      Math.abs(height - terrainManager.getHeightAt(x + 5, z)),
-      Math.abs(height - terrainManager.getHeightAt(x - 5, z)),
-      Math.abs(height - terrainManager.getHeightAt(x, z + 5)),
-      Math.abs(height - terrainManager.getHeightAt(x, z - 5))
-    );
+    const samples = [
+      terrainManager.getHeightAt(x + 5, z),
+      terrainManager.getHeightAt(x - 5, z),
+      terrainManager.getHeightAt(x, z + 5),
+      terrainManager.getHeightAt(x, z - 5)
+    ];
+    
+    // Skip areas with water
+    if (height <= terrainManager.waterLevel + 1) {
+      continue;
+    }
+    
+    // Calculate max slope
+    let maxSlope = 0;
+    for (const sample of samples) {
+      const slope = Math.abs(height - sample);
+      maxSlope = Math.max(maxSlope, slope);
+    }
     
     // If slope is less than 3 units, it's relatively flat
-    if (surroundingSlope < 3) {
+    if (maxSlope < 3) {
       teleportPlayer(player, x, z, window.terrain);
+      
+      // Generate new waypoints from this position
+      if (waypointSystem) {
+        waypointSystem.generateWaypoints(8, player.position);
+      }
+      
+      // Show a brief notification
+      const notification = document.createElement('div');
+      notification.textContent = 'Teleported to new location';
+      notification.style.position = 'fixed';
+      notification.style.top = '50%';
+      notification.style.left = '50%';
+      notification.style.transform = 'translate(-50%, -50%)';
+      notification.style.background = 'rgba(0, 0, 0, 0.7)';
+      notification.style.color = 'white';
+      notification.style.padding = '10px';
+      notification.style.borderRadius = '5px';
+      notification.style.zIndex = '1000';
+      document.body.appendChild(notification);
+      
+      setTimeout(() => {
+        document.body.removeChild(notification);
+      }, 1500);
+      
       break;
     }
   }
@@ -289,6 +364,9 @@ function animate(currentTime) {
     fps = 1 / deltaTime;
   }
   lastTime = currentTime;
+  
+  // Cap delta time to prevent huge jumps
+  deltaTime = Math.min(deltaTime, 0.1);
   
   // Update FPS display
   if (fpsDisplay) {
@@ -342,10 +420,10 @@ function updateUI() {
     const currentChunk = terrainManager.currentChunk;
     
     chunkInfoDisplay.innerHTML = `
-      Chunks loaded: ${loadedChunks}<br>
+      Micro chunks loaded: ${loadedChunks}<br>
       Current chunk: (${currentChunk.x}, ${currentChunk.z})<br>
       View distance: ${terrainManager.viewDistance} chunks<br>
-      Chunk size: ${terrainManager.chunkSize} units
+      Chunk size: ${terrainManager.microSize} units
     `;
   }
   

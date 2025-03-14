@@ -37,9 +37,9 @@ export class PlayerPhysics {
     }
     
     // Apply gravity when not on ground
-    if (!player.isOnGround) {
-      player.velocity.y -= this.gravity * deltaTime;
-    }
+    //if (!player.isOnGround) {
+    //  player.velocity.y -= this.gravity * deltaTime;
+    //}
     
     // Update position
     player.position.x += player.velocity.x * deltaTime;

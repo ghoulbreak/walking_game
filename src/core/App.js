@@ -8,7 +8,7 @@ import { UIController } from './UIController.js';
 import { PlayerController } from '../player/PlayerController.js';
 import { TerrainManager } from '../terrain/terrain-manager.js';
 import { WaypointSystem } from '../navigation/WaypointSystem.js';
-import { defaultProfile } from '../terrain/profiles.js';
+import { TerrainProfiles, defaultProfile } from '../terrain/profiles.js';
 
 /**
  * Main application class that manages the game loop and coordinates

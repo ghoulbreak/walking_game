@@ -6,19 +6,41 @@ import { App } from './core/App.js';
 /**
  * Initialize the application when the DOM content is loaded
  */
-window.addEventListener('DOMContentLoaded', async () => {
-  // Create and initialize the application
-  const app = new App();
+document.addEventListener('DOMContentLoaded', async () => {
+  console.log("DOM Content Loaded - Starting application initialization");
   
   try {
+    // Dynamically import the App class
+    const { App } = await import('./core/App.js');
+    
+    // Create and initialize the application
+    const app = new App();
+    console.log("App instance created");
+    
+    // Force hide any existing loading screen
+    const existingLoadingScreen = document.getElementById('loading-screen');
+    if (existingLoadingScreen) {
+      console.log("Found existing loading screen, removing it");
+      existingLoadingScreen.style.display = 'flex'; // Make sure it's visible first for the progress updates
+    }
+    
     // Initialize all systems
+    console.log("Starting app initialization");
     await app.initialize();
     
     // Start the application
+    console.log("App initialized, starting game loop");
     app.start();
     
     // Store the app instance globally for debugging
     window.app = app;
+    
+    // Final force removal of loading screen
+    const finalCheck = document.getElementById('loading-screen');
+    if (finalCheck && finalCheck.parentNode) {
+      console.log("Final removal of loading screen");
+      finalCheck.parentNode.removeChild(finalCheck);
+    }
   } catch (error) {
     console.error('Error initializing application:', error);
     
@@ -37,7 +59,15 @@ window.addEventListener('DOMContentLoaded', async () => {
       <h2>Error initializing application</h2>
       <p>${error.message}</p>
       <pre>${error.stack}</pre>
+      <button id="restart-button" style="padding: 10px; margin-top: 15px; cursor: pointer;">
+        Restart Application
+      </button>
     `;
     document.body.appendChild(errorDiv);
+    
+    // Add restart functionality
+    document.getElementById('restart-button').addEventListener('click', () => {
+      location.reload();
+    });
   }
 });
